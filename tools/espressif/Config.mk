@@ -22,7 +22,11 @@
 
 # Remove quotes from CONFIG_ESPRESSIF_CHIP_SERIES configuration
 
-CHIP_SERIES = $(patsubst "%",%,$(CONFIG_ESPRESSIF_CHIP_SERIES))
+ARCH_SRCDIR           := $(TOPDIR)$(DELIM)arch$(DELIM)$(CONFIG_ARCH)$(DELIM)src
+ESP_HAL_3RDPARTY_REPO := esp-hal-3rdparty
+CHIP_SERIES           := $(patsubst "%",%,$(CONFIG_ESPRESSIF_CHIP_SERIES))
+
+# include $(ARCH_SRCDIR)$(DELIM)chip$(DELIM)$(ESP_HAL_3RDPARTY_REPO)$(DELIM)nuttx$(DELIM)$(CHIP_SERIES)$(DELIM)include$(DELIM)sdkconfig.h
 
 # MCUBoot requires a region in flash for the E-Fuse virtual mode.
 # To avoid erasing this region, flash a dummy empty file to the
@@ -48,6 +52,8 @@ else ifeq ($(CONFIG_ESPRESSIF_FLASH_8M),y)
 	FLASH_SIZE := 8MB
 else ifeq ($(CONFIG_ESPRESSIF_FLASH_16M),y)
 	FLASH_SIZE := 16MB
+else ifeq ($(CONFIG_ESPRESSIF_FLASH_32M),y)
+	FLASH_SIZE := 32MB
 endif
 
 ifeq ($(CONFIG_ESPRESSIF_FLASH_MODE_DIO),y)
@@ -78,7 +84,11 @@ ESPTOOL_MIN_VERSION := 4.8.0
 
 ifdef ESPTOOL_BINDIR
 	ifeq ($(CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT),y)
-		BL_OFFSET       := 0x0000
+		ifeq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
+			BL_OFFSET := 0x2000
+		else
+			BL_OFFSET := 0x0000
+		endif
 		BOOTLOADER      := $(ESPTOOL_BINDIR)/mcuboot-$(CHIP_SERIES).bin
 		FLASH_BL        := $(BL_OFFSET) $(BOOTLOADER)
 		ESPTOOL_BINS    := $(FLASH_BL)
@@ -122,7 +132,11 @@ ifeq ($(CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT),y)
 		-H $(CONFIG_ESPRESSIF_APP_MCUBOOT_HEADER_SIZE) --pad-header \
 		-S $(CONFIG_ESPRESSIF_OTA_SLOT_SIZE)
 else ifeq ($(CONFIG_ESPRESSIF_SIMPLE_BOOT),y)
-	APP_OFFSET     := 0x0000
+	ifeq ($(CONFIG_ARCH_CHIP_ESP32P4),y)
+		APP_OFFSET := 0x2000
+	else
+		APP_OFFSET := 0x0000
+	endif
 	APP_IMAGE      := nuttx.bin
 	FLASH_APP      := $(APP_OFFSET) $(APP_IMAGE)
 	ESPTOOL_BINDIR := .
@@ -248,6 +262,13 @@ define MKIMAGE
 endef
 endif
 
+# MAKEUF2 -- Merge raw binary files into uf2 format
+
+define MAKEUF2
+	esptool.py -c $(CHIP_SERIES) merge_bin --format uf2 -o nuttx.merged.uf2 -fs $(FLASH_SIZE) -fm $(FLASH_MODE) $(ESPTOOL_BINS)
+	$(Q) echo "Generated: nuttx.merged.uf2"
+endef
+
 # POSTBUILD -- Perform post build operations
 
 define POSTBUILD
@@ -255,6 +276,7 @@ define POSTBUILD
 	$(if $(CONFIG_ESPRESSIF_BOOTLOADER_MCUBOOT),$(call MAKE_VIRTUAL_EFUSE_BIN))
 	$(if $(CONFIG_ESPRESSIF_SECURE_FLASH_ENC_ENABLED),$(call FLASH_ENC))
 	$(if $(CONFIG_ESPRESSIF_MERGE_BINS),$(call MERGEBIN))
+	$(if $(UF2),$(call MAKEUF2))
 endef
 
 # ESPTOOL_BAUD -- Serial port baud rate used when flashing/reading via esptool.py
@@ -273,5 +295,12 @@ define FLASH
 	$(if $(CONFIG_ESPRESSIF_SECURE_FLASH_ENC_ENABLED),$(call BURN_EFUSES))
 	$(eval ESPTOOL_OPTS := -c $(CHIP_SERIES) -p $(ESPTOOL_PORT) -b $(ESPTOOL_BAUD) $(if $(CONFIG_ESPRESSIF_ESPTOOLPY_NO_STUB),--no-stub))
 	$(eval WRITEFLASH_OPTS := $(if $(CONFIG_ESPRESSIF_MERGE_BINS),$(ESPTOOL_WRITEFLASH_OPTS) 0x0 nuttx.merged.bin,$(ESPTOOL_WRITEFLASH_OPTS) $(ESPTOOL_BINS)))
-	esptool.py $(ESPTOOL_OPTS) write_flash $(WRITEFLASH_OPTS)
+
+	$(Q) if [ -z $(UF2) ]; then \
+		esptool.py $(ESPTOOL_OPTS) write_flash $(WRITEFLASH_OPTS); \
+	else \
+		echo "Flashing using UF2 file."; \
+		cp nuttx.merged.uf2 $(ESPTOOL_PORT); \
+		sync; \
+	fi
 endef

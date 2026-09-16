@@ -27,7 +27,7 @@
 #include <nuttx/config.h>
 
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
@@ -238,6 +238,10 @@ static const struct pci_device_id_s g_igc_id_table[] =
     .driver_data = (uintptr_t)&g_igc_i225lm
   },
   {
+    PCI_DEVICE(0x8086, 0x15f3),
+    .driver_data = (uintptr_t)&g_igc_i225lm
+  },
+  {
     PCI_DEVICE(0x8086, 0x125c),
     .driver_data = (uintptr_t)&g_igc_i226v
   },
@@ -266,6 +270,12 @@ static const struct netdev_ops_s g_igc_ops =
  * Private Functions
  *****************************************************************************/
 
+/* The device requires 32-bit register accesses, but volatile does not pin
+ * the access width: GCC 16 narrows a 32-bit load feeding a single bit test
+ * into a byte load.  Launder the value through a register with an empty
+ * asm, on loads and stores both, to force the full-width access.
+ */
+
 /*****************************************************************************
  * Name: igc_getreg_mem
  *****************************************************************************/
@@ -273,8 +283,11 @@ static const struct netdev_ops_s g_igc_ops =
 static uint32_t igc_getreg_mem(FAR struct igc_driver_s *priv,
                                unsigned int offset)
 {
-  uintptr_t addr = priv->base + offset;
-  return *((FAR volatile uint32_t *)addr);
+  uintptr_t addr   = priv->base + offset;
+  uint32_t  regval = *((FAR volatile uint32_t *)addr);
+
+  __asm__ __volatile__("" : "+r"(regval));
+  return regval;
 }
 
 /*****************************************************************************
@@ -286,6 +299,8 @@ static void igc_putreg_mem(FAR struct igc_driver_s *priv,
                            uint32_t value)
 {
   uintptr_t addr = priv->base + offset;
+
+  __asm__ __volatile__("" : "+r"(value));
   *((FAR volatile uint32_t *)addr) = value;
 }
 
@@ -648,7 +663,7 @@ static FAR netpkt_t *igc_receive(FAR struct netdev_lowerhalf_s *dev)
   if (rx->errors)
     {
       nerr("RX error reported (%"PRIu8")\n", rx->errors);
-      NETDEV_RXERRORS(&priv->dev);
+      NETDEV_RXERRORS(&priv->dev.netdev);
       netpkt_free(dev, pkt, NETPKT_RX);
       return NULL;
     }
@@ -687,7 +702,7 @@ static void igc_txdone(FAR struct netdev_lowerhalf_s *dev)
       if (!(priv->tx[priv->tx_done].status & IGC_TDESC_STATUS_DD))
         {
           nerr("tx failed: 0x%" PRIx32 "\n", priv->tx[priv->tx_done].status);
-          NETDEV_TXERRORS(priv->dev);
+          NETDEV_TXERRORS(&priv->dev.netdev);
         }
 
       /* Free net packet */

@@ -30,7 +30,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <assert.h>
 
 #include <nuttx/kmalloc.h>
@@ -216,30 +216,11 @@ static void devif_callback_free(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-static bool devif_event_trigger(uint16_t events, uint16_t triggers)
+static inline bool devif_event_trigger(uint32_t events, uint32_t triggers)
 {
-  /* The events are divided into a set of individual bits that may be ORed
-   * together PLUS a field that encodes a single poll event.
-   *
-   * First check if any of the individual event bits will trigger the
-   * callback.
-   */
+  /* check if any of the individual event bits will trigger the callback. */
 
-  if ((events & triggers & ~DEVPOLL_MASK) != 0)
-    {
-      return true;
-    }
-
-  /* No... check the encoded device event. */
-
-  if ((events & DEVPOLL_MASK) == (triggers & DEVPOLL_MASK))
-    {
-      return (triggers & DEVPOLL_MASK) != 0;
-    }
-
-  /* No.. this event set will not generate the callback */
-
-  return false;
+  return (events & triggers) != 0;
 }
 
 /****************************************************************************
@@ -275,11 +256,12 @@ devif_callback_alloc(FAR struct net_driver_s *dev,
    */
 
   /* Note: dev->d_flags may be asynchronously changed by netdev_ifdown()
-   * (in net/netdev/netdev_ioctl.c). Nevertheless, net_lock() / net_unlock()
-   * are not required in netdev_ifdown() to prevent dev->d_flags from
-   * asynchronous change here. There is not an issue because net_lock() and
-   * net_unlock() present inside of devif_dev_event(). That should be enough
-   * to de-allocate connection callbacks reliably on NETDEV_DOWN event.
+   * (in net/netdev/netdev_ioctl.c). Nevertheless, netdev_lock() /
+   * netdev_unlock() are not required in netdev_ifdown() to prevent
+   * dev->d_flags from asynchronous change here. There is not an issue
+   * because netdev_lock() and netdev_unlock() present inside of
+   * devif_dev_event(). That should be enough to de-allocate connection
+   * callbacks reliably on NETDEV_DOWN event.
    */
 
   if (dev && !netdev_verify(dev))
@@ -451,7 +433,7 @@ void devif_dev_callback_free(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-uint16_t devif_conn_event(FAR struct net_driver_s *dev, uint16_t flags,
+uint32_t devif_conn_event(FAR struct net_driver_s *dev, uint32_t flags,
                           FAR struct devif_callback_s *list)
 {
   FAR struct devif_callback_s *next;
@@ -473,12 +455,26 @@ uint16_t devif_conn_event(FAR struct net_driver_s *dev, uint16_t flags,
 
       if (list->event != NULL && devif_event_trigger(flags, list->flags))
         {
+          list->free_flags |= DEVIF_CB_DONT_FREE;
+
           /* Yes.. perform the callback.  Actions perform by the callback
            * may delete the current list entry or add a new list entry to
            * beginning of the list (which will be ignored on this pass)
            */
 
           flags = list->event(dev, list->priv, flags);
+          list->free_flags &= ~DEVIF_CB_DONT_FREE;
+
+          /* update the next callback to prevent previously recorded the
+           * next callback from being deleted
+           */
+
+          next = list->nxtconn;
+          if ((list->free_flags & DEVIF_CB_PEND_FREE) != 0)
+            {
+              list->free_flags &= ~DEVIF_CB_PEND_FREE;
+              devif_callback_free(dev, list, NULL, NULL);
+            }
         }
 
       /* Set up for the next time through the loop */
@@ -508,7 +504,7 @@ uint16_t devif_conn_event(FAR struct net_driver_s *dev, uint16_t flags,
  *
  ****************************************************************************/
 
-uint16_t devif_dev_event(FAR struct net_driver_s *dev, uint16_t flags)
+uint32_t devif_dev_event(FAR struct net_driver_s *dev, uint32_t flags)
 {
   FAR struct devif_callback_s *cb;
   FAR struct devif_callback_s *next;

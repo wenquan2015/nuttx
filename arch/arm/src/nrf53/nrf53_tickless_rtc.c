@@ -31,7 +31,7 @@
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/arch.h>
 
@@ -200,8 +200,6 @@ static void rtc_cancel_ack(void)
   g_tickless_dev.alarm_set = false;
 
   leave_critical_section(flags);
-
-  return OK;
 }
 
 /****************************************************************************
@@ -244,7 +242,7 @@ static int rtc_handler(int irq, void *context, void *arg)
 
       /* let scheduler now of alarm firing */
 
-      nxsched_timer_expiration();
+      nxsched_process_timer();
     }
 
   leave_critical_section(flags);
@@ -355,5 +353,5 @@ void up_timer_initialize(void)
 
   /* kick off alarm scheduling */
 
-  nxsched_timer_expiration();
+  nxsched_process_timer();
 }

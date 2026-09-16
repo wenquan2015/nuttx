@@ -41,6 +41,43 @@ Timing Fidelity
    Another option is to use ``CONFIG_SIM_WALLTIME_SLEEP`` which will enable the
    tick events to be delayed from the Idle task by using a host sleep call.
 
+BabbleSim Discrete Time
+-----------------------
+
+The Linux ``sim`` target can optionally use a BabbleSim PHY process as the
+monotonic time source.  This is useful for tests where a NuttX host-side stack
+and other BabbleSim devices need to advance in the same discrete-time domain.
+
+Enable ``CONFIG_SIM_BSIM_TIME`` together with ``CONFIG_SIM_WALLTIME_SLEEP``.
+This mode is available only on Linux hosts and is not supported with SMP or
+``CONFIG_SIM_WALLTIME_SIGNAL``.
+
+When ``CONFIG_SIM_BSIM_TIME`` is enabled, the build needs the BabbleSim
+component headers and libraries:
+
+.. code:: console
+
+   $ export BSIM_OUT_PATH=/path/to/bsim
+   $ export BSIM_COMPONENTS_PATH=${BSIM_OUT_PATH}/components
+
+``BSIM_LIBS_DIR`` may be used instead of ``BSIM_OUT_PATH`` when the BabbleSim
+shared libraries are installed in a non-default directory.
+
+When ``CONFIG_SIM_BSIM_TIME`` is enabled, the simulator connects to the
+BabbleSim PHY at startup:
+
+.. code:: console
+
+   $ ./nuttx --sim-bsim-sid=default \
+       --sim-bsim-pid=2G4 \
+       --sim-bsim-dev=0
+
+The BabbleSim PHY process must be started separately by the test runner before
+launching the NuttX simulator.
+
+The runtime options override ``CONFIG_SIM_BSIM_SIM_ID``,
+``CONFIG_SIM_BSIM_PHY_ID``, and ``CONFIG_SIM_BSIM_DEVICE_NBR``.
+
 Debugging
 =========
 
@@ -72,6 +109,45 @@ graphical front-end to GDB:
    This above steps work fine on Linux, Cygwin, and macOS. On Cygwin, you will
    need to start the Cygwin-X server before running ``ddd``. On macOS, it's
    probably easier to use ``lldb`` instead of ``gdb``.
+
+S2OPC
+=====
+
+The ``sim:s2opc`` configuration provides the S2OPC OPC UA server example.
+Build it from the NuttX source directory::
+
+  $ ./tools/configure.sh -l sim:s2opc
+  $ make -j
+
+An out-of-tree CMake build is also supported::
+
+  $ cmake -B build -DBOARD_CONFIG=sim:s2opc -GNinja
+  $ cmake --build build
+
+The simulator attaches its TAP device to a host bridge named ``s2opc0``.
+Create the bridge and assign the host address::
+
+  $ sudo ip link add s2opc0 type bridge
+  $ sudo ip address add 10.0.0.1/24 dev s2opc0
+  $ sudo ip link set s2opc0 up
+
+Start NuttX with permission to create the TAP device, then start the server::
+
+  $ ./nuttx
+  nsh> ping 10.0.0.1
+  nsh> s2opc
+
+From another host terminal, read the standard server time node::
+
+  $ uaread -u opc.tcp://10.0.0.2:4841 -n i=2258
+
+Press Ctrl-C at the NSH terminal to stop the server.  After testing, stop
+NuttX and remove the bridge::
+
+  $ sudo ip link delete s2opc0
+
+See :doc:`/applications/examples/s2opc/index` for command-line overrides and
+:doc:`/applications/netutils/s2opc/index` for toolkit configuration.
 
 Issues
 ======
@@ -587,6 +663,23 @@ We only need to select the appropriate audio device to playback this file:
    nxplayer> device /dev/audio/pcm1p
    nxplayer> play /host/mother.mp3
 
+baromonitor
+-----------
+
+This configuration includes LVGL graphics over the X11 frame buffer interface,
+and includes the :doc:`baromonitor </applications/examples/baromonitor/index>`
+example. It also includes the ``uorb_generator`` (see
+:doc:`/applications/system/uorb/index`) for generation of fake barometer data to
+test with.
+
+You may wish to test the example by doing the following (this will only show
+static data):
+
+.. code:: console
+
+   nsh> uorb_generator -n 10000 -r 1 -s -t sensor_baro0 timestamp:23191100,pressure:999.12,temperature:26.34 &
+   nsh> baromonitor
+
 bluetooth
 ---------
 
@@ -597,17 +690,48 @@ the NULL Bluetooth device at ``drivers/wireless/bluetooth/bt_null.c``.
 There is also support on a Linux Host for attaching the bluetooth hardware from
 the host to the NuttX bluetooth stack via the HCI Socket interface over the User
 Channel. This is enabled in the bthcisock configuration. In order to use this
-you must give the ``nuttx`` ELF additional capabilities:
+with the configured default HCI device, you must give the ``nuttx`` ELF
+additional capabilities:
 
 .. code:: console
 
    $ sudo setcap 'cap_net_raw,cap_net_admin=eip' ./nuttx
 
-You can then monitor the HCI traffic on the host with WireShark or ``btmon``:
+The default HCI device is selected by ``CONFIG_SIM_HCISOCKET_DEVID``. It may be
+overridden at runtime with ``--bt-dev=hciN``:
+
+.. code:: console
+
+   $ ./nuttx --bt-dev=hci1
+
+You can then monitor the BlueZ HCI traffic on the host with WireShark or
+``btmon``:
 
 .. code:: console
 
    $ sudo btmon
+
+The sim target can also connect to an HCI H:4 stream exposed through a Unix
+domain socket by passing an absolute socket path:
+
+.. code:: console
+
+   $ ./nuttx --bt-dev=/tmp/hci0.sock
+
+This Unix socket mode does not require a BlueZ HCI device. Since ``nuttx`` only
+connects to a normal Unix domain socket, the ``nuttx`` process does not need to
+run as root and does not need the ``setcap`` command above. This is useful when
+the controller is provided by another host process, or when a UART controller is
+bridged into a Unix socket with a tool such as ``socat``:
+
+.. code:: console
+
+   $ socat UNIX-LISTEN:/tmp/hci0.sock,fork,reuseaddr \
+       /dev/ttyACM0,b1000000,raw,echo=0,crtscts=1
+
+The process listening on the socket must be started before NuttX. If that
+process opens a real UART device, it still needs permission to access that UART
+device.
 
 configdata
 ----------
@@ -644,6 +768,57 @@ test is used to verify the uClibc++ port to NuttX.
 
    To really use this example, I will have to think of some way to postpone
    running C++ static initializers until NuttX has been initialized.
+
+dropbear
+--------
+
+This configuration runs the `Dropbear <https://matt.ucc.asn.au/dropbear/dropbear.html>`__
+SSH server (see :doc:`/applications/netutils/dropbear/index`) on the simulator,
+so it can be tested without real hardware. NSH starts the daemon automatically
+at boot (``CONFIG_NSH_DROPBEAR``).
+
+The simulator reaches the host network through the TAP device
+(``CONFIG_SIM_NETDEV``); see :doc:`/platforms/sim/network_linux` for the
+details. In short, build and prepare the host with:
+
+.. code:: console
+
+   $ ./tools/configure.sh sim:dropbear
+   $ make
+   $ # necessary on recent Linux distributions
+   $ sudo setcap cap_net_admin+ep ./nuttx
+   $ # replace eth0 with your Ethernet or wireless interface
+   $ sudo ./tools/simhostroute.sh eth0 on
+   $ ./nuttx
+
+The defconfig preconfigures the simulation address ``10.0.1.2`` with default
+router ``10.0.1.1``, matching the network that ``simhostroute.sh`` creates on
+the host, so no manual ``ifconfig`` is needed. Add a user account (the
+password file is created on the first ``useradd``):
+
+.. code:: console
+
+   nsh> useradd admin mypassword
+
+Then open an SSH session from the host — Dropbear listens on port 2222
+(``CONFIG_NETUTILS_DROPBEAR_PORT``) — and run NSH commands remotely over a
+pseudo-terminal (``CONFIG_PSEUDOTERM``):
+
+.. code:: console
+
+   $ ssh -p 2222 admin@10.0.1.2
+   admin@10.0.1.2's password:
+   nsh>
+
+.. note::
+
+   The host key (``/tmp/dropbear_ecdsa_host_key``) and the user database
+   (``/tmp/passwd``) live on the volatile ``/tmp`` file system, so both are
+   recreated on every run: the ``useradd`` step must be repeated after each
+   boot, and OpenSSH clients will warn that the host key changed between
+   runs. For local testing the check can be relaxed with::
+
+      $ ssh -p 2222 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no admin@10.0.1.2
 
 fb
 --
@@ -945,6 +1120,30 @@ Of course, this configuration can only be used in environments that support X11!
 
       -CONFIG_EXAMPLES_NXTERM=n
       +CONFIG_EXAMPLES_NXTERM=y
+
+nxdoom
+------
+
+Play :doc:`NXDoom </applications/games/nxdoom/index>` on the Simulator using X11
+keyboard input and graphics. Read the docs for NXDoom to see how to play.
+
+By default this NuttX board config mounts the current directory from the host where it was executed, making the files visible internally at /data directory.
+So you can copy the DOOM1.WAD (or other WAD file) to the current directory where
+you compiled NuttX and run Doom from there:
+
+.. code:: console
+
+   $ cp ~/Download/DOOM1.WAD .
+   $ ./nuttx
+   NuttShell (NSH) NuttX-13.0.0
+   nsh> ls -l /data/DOOM1.WAD
+   -rw-rw-r--     4196020 2026-07-03 12:32 /data/DOOM1.WAD
+   nsh> nxdoom -iwad /data/DOOM1.WAD
+
+.. warning::
+
+   X11 keyboard codes are not perfectly translated to the NuttX codec currently,
+   so some controls will not work properly.
 
 nxffs
 -----
@@ -1354,6 +1553,30 @@ To use IPv4, modify these settings in the defconfig file:
    -CONFIG_NET_IPv6=y
    -CONFIG_NET_IPv6_NCONF_ENTRIES=4
 
+tflm
+----
+
+Builds TensorFlow Lite for Microcontrollers from
+``apps/mlearning/tflite-micro``, including the ``tflm`` command-line tool
+and the ``tflm_hello`` example.
+
+.. code-block:: console
+
+   $ ./tools/configure.sh sim:tflm
+   $ make -j$(nproc)
+   $ ./nuttx
+
+With CMake::
+
+   $ cmake -B build -DBOARD_CONFIG=sim:tflm -GNinja
+   $ cmake --build build
+   $ ./build/nuttx
+
+From NSH, ``tflm -h`` prints the tool usage. ``tflm_hello`` runs the
+upstream sine-model test and prints ``~~~ALL TESTS PASSED~~~`` on
+success. See :doc:`/applications/mlearning/tflite-micro/index` for the
+full test procedure.
+
 touchscreen
 -----------
 
@@ -1382,6 +1605,19 @@ An example usage:
    nsh> mount -t hostfs -o fs=/tmp/wasm /mnt
    nsh> toywasm --wasi /mnt/hello.wasm
    hello
+   nsh>
+
+txmorse
+-------
+
+This is a configuration with :doc:`the Morse transmitter example
+</applications/examples/txmorse/index>` using the :doc:`Morsey library
+</applications/audioutils/morsey/index>`.
+
+.. code:: console
+
+   nsh> txmorse "sos sos sos"
+    ... --- .../... --- .../... --- ...
    nsh>
 
 udgram
@@ -1903,13 +2139,19 @@ This is a configuration with login password protection for NSH.
 
 .. note::
 
-   This config has password protection enabled. The login info is:
+   This config has password protection enabled.  After configuring from
+   defconfig, set the root password in menuconfig (Board Selection →
+   Auto-generate /etc/passwd) or export ``NUTTX_ROMFS_PASSWD_PASSWORD``
+   before building.  NuttX CI uses the documented test password
+   ``NuttXSim1!`` for this configuration.
 
-   * USERNAME: admin
-   * PASSWORD: Administrator
+   * USERNAME: root (default)
+   * PASSWORD: set at build time (not stored in defconfig)
 
-   The encrypted password is retained in ``/etc/passwd``. I am sure that you
-   will find this annoying. You can disable the password protection by
+   The password must meet complexity rules (8+ chars, upper, lower, digit,
+   special).  Only the PBKDF2-HMAC-SHA256 hash is stored in ``/etc/passwd``.
+
+   You can disable the password protection by
    de-selecting ``CONFIG_NSH_CONSOLE_LOGIN=y``.
 
 can
@@ -1984,6 +2226,117 @@ Requirement: ``cansequence`` tool from ``linux-can/can-utils``
       can0  002   [1]  11
       can0  002   [1]  12
 
+
+lely and lely-sock
+------------------
+
+These configurations build the Lely CANopen demos over the CAN character
+driver. Both the slave (``coslave`` built-in, node ``0x02``) and the master
+(``comaster`` built-in, node ``0x01``) are embedded in the single image. See
+:doc:`/applications/examples/lely_slave/index` and
+:doc:`/applications/examples/lely_master/index`.
+
+The master orchestrates a small CANopen network: it reads the slave's device
+type over an SDO transfer, commands the slave to OPERATIONAL with an NMT
+start, then produces SYNC while the slave streams a counter back in a
+synchronous TPDO which the master receives via an RPDO.
+
+The ``sim:lely`` configuration uses the CAN character driver; ``sim:lely-sock``
+is the same demo over SocketCAN (``CONFIG_SIM_CANDEV_SOCK``). Both bridge to a
+host ``vcan`` interface named ``can0``, which must exist and be up on the host::
+
+    sudo modprobe vcan
+    sudo ip link add dev can0 type vcan
+    sudo ip link set up can0
+
+The SocketCAN example brings its own NuttX interface up (via ``netlib_ifup()``),
+so ``coslave``/``comaster`` can be started directly without a manual ``ifup``.
+
+.. _testing_lely_canopen_sim:
+
+Testing a CANopen network on the simulator
+==========================================
+
+The simulator CAN character driver (``CONFIG_SIM_CANDEV_CHAR``) bridges
+``/dev/can0`` to a host SocketCAN interface named ``can0`` (the index is
+``CONFIG_SIM_CANDEV_CHAR_IDX``). Each simulator process owns one host socket,
+so the two nodes are run as **two separate processes of the same image** on
+the shared ``can0`` bus.
+
+1. Create a virtual CAN interface named ``can0`` on the host:
+
+   .. code:: console
+
+      $ sudo modprobe vcan
+      $ sudo ip link add dev can0 type vcan
+      $ sudo ip link set up can0
+
+2. Build the image:
+
+   .. code:: console
+
+      $ ./tools/configure.sh sim:lely
+      $ make
+
+3. Run the slave in one terminal and the master in another (start the slave
+   first so it is up when the master boots it):
+
+   .. code:: console
+
+      # terminal 1
+      $ ./nuttx
+      nsh> coslave &
+
+      # terminal 2
+      $ ./nuttx
+      nsh> comaster &
+
+   The master prints the exchange it drives::
+
+      SDO: slave device type (0x1000) = 0x00000000
+      NMT: master + slave 0x02 OPERATIONAL
+      PDO rx: counter = 17
+      PDO rx: counter = 18
+      PDO rx: counter = 19
+
+4. Observe the bus from the host with ``candump``:
+
+   .. code:: console
+
+      $ candump can0
+      can0  702   [1]  7F                         # slave heartbeat (pre-op)
+      can0  602   [8]  40 00 10 00 00 00 00 00    # master SDO upload request
+      can0  582   [8]  43 00 10 00 00 00 00 00    # slave SDO upload response
+      can0  000   [2]  01 02                      # NMT start node 0x02
+      can0  080   [0]                             # SYNC (master)
+      can0  182   [4]  11 00 00 00                # slave TPDO (counter)
+
+
+nxscope
+-------
+
+Configuration demonstrating NxScope stream over simulated UART interface.
+
+If ``CONFIG_SIM_UART_PTY`` is disabled, the simulated UART peer must be
+created on the host before running NuttX::
+
+  socat PTY,link=/dev/ttySIM0 PTY,link=/dev/ttyNX0
+
+In that mode ``CONFIG_SIM_UART0_NAME`` is both the NuttX device name and
+the host path that the sim UART backend opens.  This works when the host
+path is stable, but it is inconvenient for automated tests and generated
+PTYs: the peer device must exist before the UART is opened, and changing
+the host path requires changing the NuttX configuration.
+
+If ``CONFIG_SIM_UART_PTY`` is enabled, NuttX creates the host
+pseudoterminal when the simulated UART is opened and prints the host
+PTY slave path.  The configured ``SIM_UARTx_NAME`` remains the NuttX
+device name, while the host PTY path is allocated at runtime and can be
+passed to the external simulator or test program.
+
+See :doc:`/applications/examples/nxscope/index` and
+:doc:`/applications/logging/nxscope/index` for more details.
+
 ROMFS System-Init
 =================
 
@@ -2008,24 +2361,25 @@ mounted at ``/etc`` and will look like this at run-time:
    nsh>
 
 ``/etc/init.d/rc.sysinit`` is system init script; ``/etc/init.d/rcS`` is the
-start-up script; ``/etc/passwd`` is a the password file. It supports a single
-user:
+start-up script; ``/etc/passwd`` is the password file.
 
-.. code:: text
+The ``/etc/passwd`` file is auto-generated at build time when
+``CONFIG_BOARD_ETC_ROMFS_PASSWD_ENABLE`` is set.  Enable the option and set
+credentials via ``make menuconfig``:
 
-   USERNAME:  admin
-   PASSWORD:  Administrator
+* ``CONFIG_BOARD_ETC_ROMFS_PASSWD_ENABLE=y``
+* ``CONFIG_NSH_CONSOLE_LOGIN=y`` (required, otherwise login is not enforced)
+* ``CONFIG_BOARD_ETC_ROMFS_PASSWD_USER`` (default: ``root``)
+* ``CONFIG_BOARD_ETC_ROMFS_PASSWD_PASSWORD`` (required; minimum 8 characters
+  with uppercase, lowercase, digit, and special character.  See
+  :ref:`mkpasswd_autogen`)
 
-.. code:: console
+The password is hashed with PBKDF2-HMAC-SHA256 at build time by the host tool
+``tools/mkpasswd``; the plaintext is **not** stored in the firmware.
 
-   nsh> cat /etc/passwd
-   admin:8Tv+Hbmr3pLVb5HHZgd26D:0:0:/
-
-The encrypted passwords in the provided passwd file are only valid if the
-TEA key is set to: 012345678 9abcdef0 012345678 9abcdef0.
-
-Changes to either the key or the password word will require regeneration of the
-``nsh_romfimg.h`` header file.
+For the full description of the build-time password generation mechanism,
+file format, and verification steps, see
+:ref:`mkpasswd_autogen`.
 
 The format of the password file is:
 
@@ -2036,10 +2390,29 @@ The format of the password file is:
 Where:
 
 * user: User name
-* x: Encrypted password
+* x: PBKDF2-HMAC-SHA256 hash (modular crypt format)
 * uid: User ID (0 for now)
 * gid: Group ID (0 for now)
 * home: Login directory (/ for now)
+
+For configuration, verification steps, and password complexity rules, see
+:ref:`mkpasswd_autogen`.
+
+Login test inside the simulator
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use the root password you set at build time (menuconfig or
+``NUTTX_ROMFS_PASSWD_PASSWORD``).  For ``sim/login``, CI uses the documented
+test password ``NuttXSim1!``; see :ref:`mkpasswd_autogen`.
+
+.. code:: console
+
+   $ ./nuttx
+   NuttShell (NSH) NuttX-<version>
+   nsh login: root
+   Password:
+   User Logged-in!
+   nsh>
 
 ``/etc/group`` is a group file. It is not currently used.
 

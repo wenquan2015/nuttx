@@ -31,7 +31,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <sched.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <assert.h>
 #include <errno.h>
 
@@ -189,7 +189,6 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
   struct sched_param param;
   FAR struct tcb_s *parent;
   int policy;
-  int errcode;
   int ret;
 
   DEBUGASSERT(trampoline != NULL);
@@ -226,10 +225,6 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
 
   nxtask_joininit(ptcb);
 
-#ifndef CONFIG_PTHREAD_MUTEX_UNSAFE
-  spin_lock_init(&ptcb->mhead_lock);
-#endif
-
   /* Bind the parent's group to the new TCB (we have not yet joined the
    * group).
    */
@@ -242,7 +237,6 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
   ret = addrenv_join(this_task(), ptcb);
   if (ret < 0)
     {
-      errcode = -ret;
       goto errout_with_tcb;
     }
 #endif
@@ -269,18 +263,17 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
 
   if (ret != OK)
     {
-      errcode = ENOMEM;
+      ret = -ENOMEM;
       goto errout_with_tcb;
     }
 
-#if defined(CONFIG_ARCH_ADDRENV) && \
-    defined(CONFIG_BUILD_KERNEL) && defined(CONFIG_ARCH_KERNEL_STACK)
+#if defined(CONFIG_ARCH_ADDRENV) && defined(CONFIG_ARCH_KERNEL_STACK)
   /* Allocate the kernel stack */
 
   ret = up_addrenv_kstackalloc(ptcb);
   if (ret < 0)
     {
-      errcode = ENOMEM;
+      ret = -ENOMEM;
       goto errout_with_tcb;
     }
 #endif
@@ -299,7 +292,6 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
       ret = nxsched_get_param(0, &param);
       if (ret < 0)
         {
-          errcode = -ret;
           goto errout_with_tcb;
         }
 
@@ -308,7 +300,7 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
       policy = nxsched_get_scheduler(0);
       if (policy < 0)
         {
-          errcode = -policy;
+          ret = policy;
           goto errout_with_tcb;
         }
     }
@@ -333,27 +325,31 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
   if (policy == SCHED_SPORADIC)
     {
       FAR struct sporadic_s *sporadic;
-      sclock_t repl_ticks;
-      sclock_t budget_ticks;
+      clock_t repl_ticks;
+      clock_t budget_ticks;
 
-      /* Convert timespec values to system clock ticks */
+      /* Validate the priority before initializing sporadic state */
 
-      repl_ticks = clock_time2ticks(&param.sched_ss_repl_period);
-      budget_ticks = clock_time2ticks(&param.sched_ss_init_budget);
-
-      /* The replenishment period must be greater than or equal to the
-       * budget period.
-       */
-
-      if (repl_ticks < budget_ticks)
+      if (param.sched_priority < SCHED_PRIORITY_MIN ||
+          param.sched_priority > SCHED_PRIORITY_MAX)
         {
-          errcode = EINVAL;
-          goto errout_with_tcb;
+          ret = -EINVAL;
+        }
+      else
+        {
+          /* Validate the sporadic parameters */
+
+          ret = nxsched_validate_sporadic(&param, &repl_ticks,
+                                          &budget_ticks);
         }
 
       /* Initialize the sporadic policy */
 
-      ret = nxsched_initialize_sporadic(ptcb);
+      if (ret >= 0)
+        {
+          ret = nxsched_initialize_sporadic(ptcb);
+        }
+
       if (ret >= 0)
         {
           sporadic               = ptcb->sporadic;
@@ -376,7 +372,6 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
 
       if (ret < 0)
         {
-          errcode = -ret;
           goto errout_with_tcb;
         }
     }
@@ -388,7 +383,7 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
                                 entry);
   if (ret != OK)
     {
-      errcode = EBUSY;
+      ret = -EBUSY;
       goto errout_with_tcb;
     }
 
@@ -397,7 +392,6 @@ int nx_pthread_create(pthread_trampoline_t trampoline, FAR pthread_t *thread,
   ret = tls_init_info(ptcb);
   if (ret != OK)
     {
-      errcode = -ret;
       goto errout_with_tcb;
     }
 
@@ -470,5 +464,5 @@ errout_with_tcb:
   ptcb->group = NULL;
 
   nxsched_release_tcb(ptcb, TCB_FLAG_TTYPE_PTHREAD);
-  return errcode;
+  return -ret;
 }

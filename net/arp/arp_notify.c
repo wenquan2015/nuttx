@@ -28,7 +28,7 @@
 
 #include <errno.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <netinet/in.h>
 
@@ -156,7 +156,7 @@ int arp_wait(FAR struct arp_notify_s *notify, unsigned int timeout)
 
   /* And wait for the ARP response (or a timeout). */
 
-  net_sem_timedwait_uninterruptible(&notify->nt_sem, timeout);
+  nxsem_tickwait_uninterruptible(&notify->nt_sem, MSEC2TICK(timeout));
 
   /* Then get the real result of the transfer */
 
@@ -205,7 +205,6 @@ void arp_notify(in_addr_t ipaddr)
 
           curr->nt_result = OK;
           nxsem_post(&curr->nt_sem);
-          break;
         }
     }
 

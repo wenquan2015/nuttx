@@ -14,7 +14,7 @@ Cygwin (with native Windows GNU tools or Cygwin-based GNU tools).
 2) Cygwin/MSYS with Cygwin GNU toolchain, 3) Cygwin/MSYS with Windows
 native toolchain (CodeSourcery or devkitARM), or 4) Native Windows. A
 DIY toolchain for inux or Cygwin is provided by the NuttX
-`buildroot <https://bitbucket.org/nuttx/buildroot/downloads/>`__
+`buildroot <https://github.com/patacongo/buildroot>`__
 package.
 
 Microchip SAM3X
@@ -90,9 +90,9 @@ was contributed in part by Max Neklyudov.
 to NuttX by Masayuki Ishikawa in NuttX-7.19. The SAM4CM is a dual-CPU
 part and SMP was included for the ARMv7-M and SAM3/4 families. The
 SAM4CMP-DB board support includes an NSH configuration that operates in
-an SMP configuration. Refer to the NuttX board
-`README <https://github.com/apache/nuttx/blob/master/Documentation/platforms/arm/sam34/boards/sam4cmp-db/README.txt>`__
-file for further information.
+an SMP configuration. Refer to the
+:doc:`board documentation <boards/sam4cmp-db/index>` for further
+information.
 
 Microchip SAM4E
 ---------------
@@ -139,7 +139,7 @@ FLASH file system.
 with Windows native GNU Cortex-M3 or M4 toolchain (CodeSourcery or
 devkitARM), or 4) Native Windows. A DIY toolchain for Linux or Cygwin is
 provided by the NuttX
-`buildroot <https://bitbucket.org/nuttx/buildroot/downloads/>`__
+`buildroot <https://github.com/patacongo/buildroot>`__
 package.
 
 Supported Boards

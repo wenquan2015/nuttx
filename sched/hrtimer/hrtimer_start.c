@@ -32,117 +32,68 @@
 #include "hrtimer/hrtimer.h"
 
 /****************************************************************************
- * Private Functions
- ****************************************************************************/
-
-/****************************************************************************
- * Name: hrtimer_insert
- *
- * Description:
- *   Insert the given high-resolution timer into the active timer RB-tree.
- *   If the timer is already in the tree, it will be replaced.
- *   If the inserted timer becomes the earliest timer in the tree, the
- *   hardware timer will be configured to fire at its expiration.
- *
- * Input Parameters:
- *   hrtimer - Pointer to the hrtimer structure to be inserted.
- *
- * Returned Value:
- *   OK (0) on success; negated errno value on failure.
- *
- * Assumptions/Notes:
- *   - This function should be called with interrupts disabled or under
- *     spinlock protection to ensure RB-tree integrity.
- *   - If the timer is currently running, insertion is rejected with -EBUSY.
- ****************************************************************************/
-
-static inline int hrtimer_insert(FAR hrtimer_t *hrtimer)
-{
-  DEBUGASSERT(hrtimer != NULL);
-
-  /* Insert (or replace) the timer into the RB-tree ordered by expiration */
-
-  RB_INSERT(hrtimer_tree_s, &g_hrtimer_tree, &hrtimer->node);
-
-  /* Mark the timer as armed */
-
-  hrtimer->state = HRTIMER_STATE_ARMED;
-
-  /* If the inserted timer is now the earliest, start hardware timer */
-
-  if (&hrtimer->node == RB_MIN(hrtimer_tree_s, &g_hrtimer_tree))
-    {
-      return hrtimer_starttimer(hrtimer->expired);
-    }
-
-  return OK;
-}
-
-/****************************************************************************
  * Public Functions
  ****************************************************************************/
 
 /****************************************************************************
- * Name: hrtimer_start
+ * Name: hrtimer_start_absolute
  *
  * Description:
  *   Start a high-resolution timer to expire after a specified duration
- *   in nanoseconds, either as an absolute or relative time.
+ *   in nanoseconds.
  *
  * Input Parameters:
- *   hrtimer - Pointer to the hrtimer structure.
- *   ns      - Expiration time in nanoseconds. Interpretation
- *             depends on mode.
- *   mode    - Timer mode (HRTIMER_MODE_ABS or HRTIMER_MODE_REL).
+ *   hrtimer - Pointer to the hrtimer.
+ *   func    - Expiration callback function.
+ *   expired - Expiration time in nanoseconds.
  *
  * Returned Value:
  *   OK (0) on success, or a negated errno value on failure.
  *
- * Assumptions/Notes:
- *   - This function disables interrupts briefly via spinlock to safely
- *     insert the timer into the RB-tree.
- *   - Absolute mode sets the timer to expire at the given absolute time.
- *   - Relative mode sets the timer to expire after 'ns'
- *     nanoseconds from the current time.
+ * Assumptions:
+ *   - hrtimer is not NULL and func is not NULL.
+ *
  ****************************************************************************/
 
-int hrtimer_start(FAR hrtimer_t *hrtimer,
-                  uint64_t ns,
-                  enum hrtimer_mode_e mode)
+int hrtimer_start_absolute(FAR hrtimer_t *hrtimer, hrtimer_entry_t func,
+                           uint64_t expired)
 {
   irqstate_t flags;
-  int ret = OK;
+  bool       reprogram = false;
+  int        ret       = OK;
 
-  DEBUGASSERT(hrtimer != NULL);
+  DEBUGASSERT(hrtimer != NULL && func != NULL);
 
-  /* Protect RB-tree manipulation with spinlock and disable interrupts */
+  /* Acquire the lock and seize the ownership of the hrtimer queue. */
 
-  flags = spin_lock_irqsave(&g_hrtimer_spinlock);
+  flags = write_seqlock_irqsave(&g_hrtimer_lock);
 
-  /* Reject start if the timer is already running or armed */
+  /* Ensure no running core can write the hrtimer. */
 
-  if ((hrtimer->state == HRTIMER_STATE_RUNNING) ||
-      (hrtimer->state == HRTIMER_STATE_ARMED))
+  hrtimer_cancel_running(hrtimer);
+
+  if (hrtimer_is_pending(hrtimer))
     {
-      spin_unlock_irqrestore(&g_hrtimer_spinlock, flags);
-      return -EBUSY;
+      reprogram = hrtimer_remove(hrtimer);
     }
 
-  /* Compute absolute expiration time */
+  hrtimer->func    = func;
+  hrtimer->expired = expired;
 
-  if (mode == HRTIMER_MODE_ABS)
+  /* Insert the timer into the hrtimer queue. */
+
+  reprogram |= hrtimer_insert(hrtimer);
+
+  /* If the inserted timer is now the earliest, start hardware timer */
+
+  if (reprogram)
     {
-      hrtimer->expired = ns;
-    }
-  else
-    {
-      hrtimer->expired = hrtimer_gettime() + ns;
+      hrtimer_reprogram(hrtimer_get_first()->expired);
     }
 
-  /* Insert the timer into the RB-tree */
+  /* Release the lock and give up the ownership of the hrtimer queue. */
 
-  ret = hrtimer_insert(hrtimer);
+  write_sequnlock_irqrestore(&g_hrtimer_lock, flags);
 
-  spin_unlock_irqrestore(&g_hrtimer_spinlock, flags);
   return ret;
 }

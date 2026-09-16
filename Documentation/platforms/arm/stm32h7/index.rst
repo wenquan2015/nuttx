@@ -13,7 +13,7 @@ MCU          Support Note
 STM32H747    Partial Only STM32H747XI
 STM32H757    No
 STM32H745    Yes
-STM32H755    No
+STM32H755    Partial Only STM32H755II and STM32H755XI
 ===========  ======= ================
 
 Single-core lines:
@@ -30,6 +30,10 @@ STM32H725    No
 STM32H735    No
 STM32H723    No
 STM32H733    No
+STM32H7R3    Yes
+STM32H7R7    Yes
+STM32H7S3    Yes
+STM32H7S7    Yes
 ===========  ======= ================
 
 Value lines:
@@ -104,6 +108,33 @@ ETH         Yes
 HDMI_CEC    No
 ==========  =======  =====
 
+STM32H7R/S peripherals
+----------------------
+
+The following peripherals are available only on the STM32H7R/S lines:
+
+==========  =======
+Peripheral  Support
+==========  =======
+XSPI        Yes
+SBS         Yes
+GPDMA       No
+HPDMA       No
+ADF         No
+CORDIC      No
+DCMIPP      No
+DTS         No
+GFXMMU      No
+GFXTIM      No
+GPU2D       No
+I3C         No
+MCE         No
+PKA         No
+PSSI        No
+SAES        No
+UCPD        No
+==========  =======
+
 Dual-core support
 =================
 
@@ -114,7 +145,7 @@ The selection of the core for which the image is build is made using options:
   - ``CONFIG_ARCH_CHIP_STM32H7_CORTEXM4`` - selects Cortex-M4 core
 
 Support for the CM7 core is always enabled, support for the CM4 core is controlled
-with the ``CONFIG_STM32H7_CORTEXM4_ENABLED`` option.
+with the ``CONFIG_STM32_CORTEXM4_ENABLED`` option.
 
 Interprocessor communication between cores is realized with the NuttX RPTUN
 device based on the OpenAMP framework. ``HSEM`` is used for synchronization and

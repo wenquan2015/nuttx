@@ -26,7 +26,7 @@
 
 #include <errno.h>
 #include <stdio.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/list.h>
 #include <nuttx/wqueue.h>
@@ -1180,7 +1180,7 @@ static void i3c_master_handle_ibi(FAR void *arg)
     }
 
   master->ops->recycle_ibi_slot(dev, slot);
-  atomic_fetch_sub(&dev->ibi->pending_ibis, 1);
+  atomic_sub(&dev->ibi->pending_ibis, 1);
   if (!atomic_read(&dev->ibi->pending_ibis))
     {
       sem_post(&dev->ibi->all_ibis_handled);
@@ -1800,7 +1800,7 @@ err_free_dev:
 void i3c_master_queue_ibi(FAR struct i3c_dev_desc *dev,
                           FAR struct i3c_ibi_slot *slot)
 {
-  atomic_fetch_add(&dev->ibi->pending_ibis, 1);
+  atomic_add(&dev->ibi->pending_ibis, 1);
   work_queue(HPWORK, &slot->work, i3c_master_handle_ibi, slot, 0);
 }
 
@@ -2171,7 +2171,7 @@ void i3c_master_detach_i2c_dev(FAR struct i3c_master_controller *master,
  *     -ENOTSUP if set to true since secondary masters are not yet supported
  *
  * return:
- *   OK if the driver was successfully register; A negated errno value is
+ *   OK if the driver was successfully registered; A negated errno value is
  *   returned on any failure.
  *
  ****************************************************************************/

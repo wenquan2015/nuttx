@@ -126,10 +126,6 @@ int nxtask_init(FAR struct tcb_s *tcb, const char *name, int priority,
   nxtask_joininit(tcb);
 #endif
 
-#if !defined(CONFIG_DISABLE_PTHREAD) && !defined(CONFIG_PTHREAD_MUTEX_UNSAFE)
-  spin_lock_init(&tcb->mhead_lock);
-#endif
-
   /* Duplicate the parent tasks environment */
 
   ret = env_dup(tcb->group, envp);
@@ -167,6 +163,19 @@ int nxtask_init(FAR struct tcb_s *tcb, const char *name, int priority,
     {
       goto errout_with_group;
     }
+
+#if defined(CONFIG_ARCH_ADDRENV) && defined(CONFIG_ARCH_KERNEL_STACK)
+  /* Allocate the kernel stack */
+
+  if (ttype != TCB_FLAG_TTYPE_KERNEL)
+    {
+      ret = up_addrenv_kstackalloc(tcb);
+      if (ret < 0)
+        {
+          goto errout_with_group;
+        }
+    }
+#endif
 
   /* Initialize the task control block */
 

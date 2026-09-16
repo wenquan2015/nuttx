@@ -28,7 +28,7 @@
 
 #include <stdint.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/net/tcp.h>
 
@@ -44,9 +44,9 @@
  ****************************************************************************/
 
 static void tcp_close_connection(FAR struct tcp_conn_s *conn,
-                                 uint16_t flags);
-static uint16_t tcp_monitor_event(FAR struct net_driver_s *dev,
-                                  FAR void *pvpriv, uint16_t flags);
+                                 uint32_t flags);
+static uint32_t tcp_monitor_event(FAR struct net_driver_s *dev,
+                                  FAR void *pvpriv, uint32_t flags);
 
 /****************************************************************************
  * Private Functions
@@ -70,7 +70,7 @@ static uint16_t tcp_monitor_event(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-static void tcp_close_connection(FAR struct tcp_conn_s *conn, uint16_t flags)
+static void tcp_close_connection(FAR struct tcp_conn_s *conn, uint32_t flags)
 {
   /* These loss-of-connection events may be reported:
    *
@@ -130,14 +130,15 @@ static void tcp_close_connection(FAR struct tcp_conn_s *conn, uint16_t flags)
  *
  ****************************************************************************/
 
-static uint16_t tcp_monitor_event(FAR struct net_driver_s *dev,
-                                  FAR void *pvpriv, uint16_t flags)
+static uint32_t tcp_monitor_event(FAR struct net_driver_s *dev,
+                                  FAR void *pvpriv, uint32_t flags)
 {
   FAR struct tcp_conn_s *conn = pvpriv;
 
   if (conn != NULL)
     {
-      ninfo("flags: %04x s_flags: %02x\n", flags, conn->sconn.s_flags);
+      ninfo("flags: %" PRIx32 " s_flags: %02x\n", flags,
+            conn->sconn.s_flags);
 
       /* TCP_DISCONN_EVENTS: TCP_ABORT, TCP_TIMEDOUT, or NETDEV_DOWN.
        * All loss-of-connection events.
@@ -205,7 +206,7 @@ static uint16_t tcp_monitor_event(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-static void tcp_shutdown_monitor(FAR struct tcp_conn_s *conn, uint16_t flags)
+static void tcp_shutdown_monitor(FAR struct tcp_conn_s *conn, uint32_t flags)
 {
   /* Perform callbacks to assure that all sockets, including dup'ed copies,
    * are informed of the loss of connection event.
@@ -271,13 +272,25 @@ int tcp_start_monitor(FAR struct socket *psock)
 
       tcp_shutdown_monitor(conn, TCP_ABORT);
 
-      /* If the peer close the connection before we call accept,
-       * in order to allow user to read the readahead data,
-       * return OK.
+      /* If the peer closed the connection before we called accept, and
+       * there is buffered read-ahead data, return OK so that the caller
+       * still gets a socket from which the pending data can be drained
+       * (followed by EOF).
+       *
+       * If there is no buffered data, however, the connection is dead:
+       * presenting it to the caller as a successfully-accepted socket
+       * makes accept() mark it _SF_CONNECTED (see net/socket/accept.c),
+       * and a subsequent blocking send() would then wait forever on a
+       * connection that will never post another event.  This happens when
+       * a peer resets the connection immediately after the handshake (for
+       * example a close with SO_LINGER {1, 0}).  Report it as not-connected
+       * instead so accept() fails cleanly rather than handing back a wedged
+       * socket.
        */
 
-      if (conn->tcpstateflags == TCP_CLOSED ||
-          conn->tcpstateflags == TCP_LAST_ACK)
+      if ((conn->tcpstateflags == TCP_CLOSED ||
+           conn->tcpstateflags == TCP_LAST_ACK) &&
+          conn->readahead != NULL)
         {
           return OK;
         }
@@ -335,7 +348,7 @@ int tcp_start_monitor(FAR struct socket *psock)
  *
  ****************************************************************************/
 
-void tcp_stop_monitor(FAR struct tcp_conn_s *conn, uint16_t flags)
+void tcp_stop_monitor(FAR struct tcp_conn_s *conn, uint32_t flags)
 {
   DEBUGASSERT(conn != NULL);
 
@@ -368,7 +381,7 @@ void tcp_stop_monitor(FAR struct tcp_conn_s *conn, uint16_t flags)
  ****************************************************************************/
 
 void tcp_lost_connection(FAR struct tcp_conn_s *conn,
-                         FAR struct devif_callback_s *cb, uint16_t flags)
+                         FAR struct devif_callback_s *cb, uint32_t flags)
 {
   DEBUGASSERT(conn != NULL);
 

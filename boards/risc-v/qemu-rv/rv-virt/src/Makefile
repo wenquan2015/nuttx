@@ -24,7 +24,13 @@ include $(TOPDIR)/Make.defs
 
 RCSRCS = etc/init.d/rc.sysinit etc/init.d/rcS
 
-CSRCS = qemu_rv_appinit.c
+ifeq ($(CONFIG_ETC_ROMFS),y)
+ifeq ($(CONFIG_SYSTEM_NXINIT),y)
+  RCSRCS += etc/init.d/init.rc
+endif
+endif
+
+CSRCS = qemu_rv_boardinit.c
 
 ifeq ($(CONFIG_BUILD_KERNEL),y)
 ifeq ($(CONFIG_RISCV_SEMIHOSTING_HOSTFS),)

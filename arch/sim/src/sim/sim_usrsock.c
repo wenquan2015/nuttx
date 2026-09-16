@@ -31,8 +31,11 @@
 #include <string.h>
 
 #include <nuttx/arch.h>
+#include <nuttx/debug.h>
 #include <nuttx/net/usrsock.h>
+#include <nuttx/wqueue.h>
 
+#include "sim_internal.h"
 #include "sim_hostusrsock.h"
 
 /****************************************************************************
@@ -355,15 +358,32 @@ static int usrsock_ioctl_handler(struct usrsock_s *usrsock,
 {
   const struct usrsock_request_ioctl_s *req = data;
   struct usrsock_message_datareq_ack_s *ack;
+  size_t copylen;
   int ret;
 
+  if (len < sizeof(*req))
+    {
+      nerr("ERROR: ioctl request too short: %zu < %zu\n",
+           len, sizeof(*req));
+      return -EINVAL;
+    }
+
+  copylen = req->arglen;
+  if (copylen > len - sizeof(*req) ||
+      copylen > SIM_USRSOCK_BUFSIZE - sizeof(*ack))
+    {
+      nerr("ERROR: ioctl arglen invalid: %zu (len=%zu bufsize=%zu)\n",
+           copylen, len, (size_t)SIM_USRSOCK_BUFSIZE);
+      return -EINVAL;
+    }
+
   ack = (struct usrsock_message_datareq_ack_s *)usrsock->out;
-  memcpy(ack + 1, req + 1, req->arglen);
+  memcpy(ack + 1, req + 1, copylen);
   ret = host_usrsock_ioctl(req->usockid, req->cmd,
                            (unsigned long)(ack + 1));
 
   return usrsock_send_dack(usrsock, ack, req->head.xid, ret,
-                           req->arglen, req->arglen);
+                           copylen, copylen);
 }
 
 static int usrsock_shutdown_handler(struct usrsock_s *usrsock,
@@ -395,8 +415,9 @@ static const usrsock_handler_t g_usrsock_handler[] =
 
 static void sim_usrsock_work(void *arg)
 {
-  work_queue(HPWORK, &g_usrsock.work, (void *)sim_usrsock_work,
-             NULL, SIM_USRSOCK_PERIOD);
+  host_usrsock_loop();
+  work_queue_next_wq(g_work_queue, &g_usrsock.work, sim_usrsock_work,
+                     NULL, SIM_USRSOCK_PERIOD);
 }
 
 /****************************************************************************
@@ -410,8 +431,8 @@ int usrsock_event_callback(int16_t usockid, uint16_t events)
 
 void usrsock_register(void)
 {
-  work_queue(HPWORK, &g_usrsock.work, (void *)sim_usrsock_work,
-             NULL, SIM_USRSOCK_PERIOD);
+  work_queue_wq(g_work_queue, &g_usrsock.work, sim_usrsock_work,
+                NULL, SIM_USRSOCK_PERIOD);
 }
 
 /****************************************************************************

@@ -30,7 +30,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #ifdef CONFIG_RTC
 #  include <nuttx/irq.h>
@@ -38,6 +38,7 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/clock.h>
+#include <nuttx/clock_notifier.h>
 #include <nuttx/trace.h>
 
 #include <nuttx/spinlock.h>
@@ -182,6 +183,7 @@ static void clock_inittime(FAR const struct timespec *tp)
     }
 
   spin_unlock_irqrestore(&g_basetime_lock, flags);
+  clock_notifier_call_chain(CLOCK_REALTIME, &g_basetime);
 #else
   clock_inittimekeeping(tp);
 #endif
@@ -226,8 +228,6 @@ void clock_initialize(void)
 
   clock_inittime(NULL);
 #endif
-
-  perf_init();
 
 #ifdef CONFIG_SCHED_CPULOAD_SYSCLK
   cpuload_init();

@@ -28,7 +28,7 @@
 #if defined(CONFIG_NET) && defined(CONFIG_NET_PKT)
 
 #include <stdint.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/net/netconfig.h>
 #include <nuttx/net/netdev.h>
@@ -55,10 +55,10 @@
  *
  ****************************************************************************/
 
-uint16_t pkt_callback(FAR struct net_driver_s *dev,
-                      FAR struct pkt_conn_s *conn, uint16_t flags)
+uint32_t pkt_callback(FAR struct net_driver_s *dev,
+                      FAR struct pkt_conn_s *conn, uint32_t flags)
 {
-  ninfo("flags: %04x\n", flags);
+  ninfo("flags: %" PRIx32 "\n", flags);
 
   /* Some sanity checking */
 

@@ -28,7 +28,7 @@
 
 #include <unistd.h>
 #include <string.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <netinet/in.h>
 #include <net/if.h>
@@ -44,6 +44,7 @@
 #include "inet/inet.h"
 #include "neighbor/neighbor.h"
 #include "route/route.h"
+#include "utils/utils.h"
 #include "icmpv6/icmpv6.h"
 
 #ifdef CONFIG_NET_ICMPv6_NEIGHBOR
@@ -74,12 +75,12 @@ struct icmpv6_neighbor_s
  * Name: icmpv6_neighbor_eventhandler
  ****************************************************************************/
 
-static uint16_t icmpv6_neighbor_eventhandler(FAR struct net_driver_s *dev,
-                                             FAR void *priv, uint16_t flags)
+static uint32_t icmpv6_neighbor_eventhandler(FAR struct net_driver_s *dev,
+                                             FAR void *priv, uint32_t flags)
 {
   FAR struct icmpv6_neighbor_s *state = (FAR struct icmpv6_neighbor_s *)priv;
 
-  ninfo("flags: %04x sent: %d\n", flags, state->snd_sent);
+  ninfo("flags: %" PRIx32 " sent: %d\n", flags, state->snd_sent);
 
   if (state)
     {
@@ -257,6 +258,11 @@ int icmpv6_neighbor(FAR struct net_driver_s *dev,
 
       net_ipv6addr_copy(lookup, dev->d_ipv6draddr);
 #endif
+
+      if (net_is_addr_unspecified(lookup))
+        {
+          return -EHOSTUNREACH;
+        }
     }
 
   /* No ARP packet if this device do not support ARP */
@@ -331,15 +337,15 @@ int icmpv6_neighbor(FAR struct net_driver_s *dev,
 
       /* Notify the device driver that new TX data is available. */
 
-      netdev_txnotify_dev(dev);
+      netdev_txnotify_dev(dev, ICMPv6_POLL);
 
       /* Wait for the send to complete or an error to occur.
-       * net_sem_wait will also terminate if a signal is received.
+       * nxsem_wait will also terminate if a signal is received.
        */
 
       do
         {
-          net_sem_wait(&state.snd_sem);
+          conn_dev_sem_timedwait(&state.snd_sem, true, UINT_MAX, NULL, dev);
         }
       while (!state.snd_sent);
 
@@ -347,7 +353,7 @@ int icmpv6_neighbor(FAR struct net_driver_s *dev,
        * received.
        */
 
-      ret = icmpv6_wait(&notify, CONFIG_ICMPv6_NEIGHBOR_DELAYMSEC);
+      ret = icmpv6_wait(dev, &notify, CONFIG_ICMPv6_NEIGHBOR_DELAYMSEC);
 
       /* icmpv6_wait will return OK if and only if the matching Neighbor
        * Advertisement is received.  Otherwise, it will return -ETIMEDOUT.

@@ -29,8 +29,8 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <debug.h>
 
+#include <nuttx/debug.h>
 #include <nuttx/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/pci/pci.h>
@@ -211,7 +211,39 @@ static void up_deinit_8259(void)
   outb(X86_PIC_EOI, X86_IO_PORT_PIC1_CMD);
   outb(X86_PIC_EOI, X86_IO_PORT_PIC2_CMD);
 }
+
+/****************************************************************************
+ * Name: up_apic_enable
+ *
+ * Description:
+ *  Enable xAPIC/x2APCI.
+ *
+ ****************************************************************************/
+
+static void up_apic_enable(void)
+{
+  uint32_t apic_base;
+
+  apic_base = read_msr(MSR_IA32_APIC_BASE) & 0xfffff000;
+
+#ifdef CONFIG_ARCH_X86_64_X2APIC
+  /* Enable the APIC in X2APIC MODE */
+
+  write_msr(MSR_IA32_APIC_BASE, apic_base | MSR_IA32_APIC_EN |
+            MSR_IA32_APIC_X2APIC | MSR_IA32_APIC_BSP);
+#else
+  /* Check xAPIC base - for now it must be 0xfee00000 */
+
+  ASSERT(apic_base == APIC_BASE);
+
+  /* Map xAPIC memory region */
+
+  up_map_region((void *)APIC_BASE, 0x1000,
+                X86_PAGE_WR | X86_PAGE_PRESENT |
+                X86_PAGE_NOCACHE | X86_PAGE_GLOBAL);
 #endif
+}
+#endif    /* CONFIG_ARCH_INTEL64_DISABLE_INT_INIT */
 
 /****************************************************************************
  * Name: up_init_apic
@@ -225,62 +257,59 @@ static void up_apic_init(void)
 {
   uint32_t ver;
   uint32_t icrl;
-  uint32_t apic_base;
 
-#ifndef CONFIG_ARCH_INTEL64_DISABLE_INT_INIT
-  /* Enable the APIC in X2APIC MODE */
+#if !defined(CONFIG_ARCH_INTEL64_DISABLE_INT_INIT)
+  /* Enable xAPIC or x2APIC */
 
-  apic_base = read_msr(MSR_IA32_APIC_BASE) & 0xfffff000;
-  write_msr(MSR_IA32_APIC_BASE, apic_base | MSR_IA32_APIC_EN |
-                                MSR_IA32_APIC_X2APIC | MSR_IA32_APIC_BSP);
+  up_apic_enable();
 #endif
 
   /* Enable the APIC and setup an spurious interrupt vector */
 
-  write_msr(MSR_X2APIC_SPIV, MSR_X2APIC_SPIV_EN | IRQ_SPURIOUS);
+  apic_write(APIC_SPIV, APIC_SPIV_EN | IRQ_SPURIOUS);
 
 #ifndef CONFIG_ARCH_INTEL64_DISABLE_INT_INIT
   /* Disable the LINT interrupt lines */
 
-  write_msr(MSR_X2APIC_LINT0, MSR_X2APIC_MASKED);
-  write_msr(MSR_X2APIC_LINT1, MSR_X2APIC_MASKED);
+  apic_write(APIC_LINT0, APIC_MASKED);
+  apic_write(APIC_LINT1, APIC_MASKED);
 
   /* Disable performance counter overflow interrupts on machines which
    * provide that interrupt entry.
    */
 
-  ver = read_msr(MSR_X2APIC_VER);
+  ver = apic_read(APIC_VER);
   if (((ver >> 16) & 0xff) >= 4)
     {
-      write_msr(MSR_X2APIC_LVTPMR, MSR_X2APIC_MASKED);
+      apic_write(APIC_LVTPMR, APIC_MASKED);
     }
 
   /* Map error interrupt to IRQ_ERROR. */
 
-  write_msr(MSR_X2APIC_LERR, MSR_X2APIC_MASKED);
+  apic_write(APIC_LERR, APIC_MASKED);
 
   /* Clear error status register (requires back-to-back writes). */
 
-  write_msr(MSR_X2APIC_ESR, 0);
-  write_msr(MSR_X2APIC_ESR, 0);
+  apic_write(APIC_ESR, 0);
+  apic_write(APIC_ESR, 0);
 
   /* Ack any outstanding interrupts. */
 
-  write_msr(MSR_X2APIC_EOI, 0);
+  apic_write(APIC_EOI, 0);
 
   /* Send an Init Level De-Assert to synchronize arbitration ID's. */
 
-  write_msr(MSR_X2APIC_ICR, MSR_X2APIC_ICR_BCAST | MSR_X2APIC_ICR_INIT |
-                            MSR_X2APIC_ICR_LEVEL);
+  apic_write(APIC_ICR, APIC_ICR_BCAST | APIC_ICR_INIT |
+             APIC_ICR_LEVEL);
   do
     {
-      icrl = read_msr(MSR_X2APIC_ICR);
+      icrl = apic_read(APIC_ICR);
     }
-  while (icrl & MSR_X2APIC_ICR_DELIVS);
+  while (icrl & APIC_ICR_DELIVS);
 
   /* Enable interrupts on the APIC (but not on the processor). */
 
-  write_msr(MSR_X2APIC_TPR, 0);
+  apic_write(APIC_TPR, 0);
 #endif
 }
 
@@ -674,12 +703,7 @@ void up_trigger_irq(int irq, cpu_set_t cpuset)
     {
       if (CPU_ISSET(cpu, &cpuset))
         {
-          write_msr(MSR_X2APIC_ICR,
-                    MSR_X2APIC_ICR_FIXED |
-                    MSR_X2APIC_ICR_ASSERT |
-                    MSR_X2APIC_DESTINATION(
-                      (uint64_t)x86_64_cpu_to_loapic(cpu)) |
-                    irq);
+          x86_64_icr_write(cpu, APIC_ICR_FIXED | APIC_ICR_ASSERT | irq);
         }
     }
 }
@@ -795,4 +819,117 @@ int up_connect_irq(const int *irq, int num, uintptr_t *mar, uint32_t *mdr)
     }
 
   return OK;
+}
+
+/****************************************************************************
+ * Name: up_set_irq_type
+ *
+ * Description:
+ *   Config an IRQ trigger type.
+ *
+ ****************************************************************************/
+
+int up_set_irq_type(int irq, int mode)
+{
+  enum ioapic_trigger_mode trigger_mode = 0;
+  uint32_t maxintr;
+  uint32_t data;
+
+  /* Setup the IO-APIC, remap the interrupt to 32~ */
+
+  maxintr = (up_ioapic_read(IOAPIC_REG_VER) >> 16) & 0xff;
+  if (irq < 0 || irq - IRQ0 > maxintr)
+    {
+      return -EINVAL;
+    }
+
+  if (mode == IRQ_RISING_EDGE)
+    {
+      trigger_mode = TRIGGER_RISING_EDGE;
+    }
+  else if (mode == IRQ_FALLING_EDGE)
+    {
+      trigger_mode = TRIGGER_FALLING_EDGE;
+    }
+  else if (mode == IRQ_HIGH_LEVEL)
+    {
+      trigger_mode = TRIGGER_LEVEL_ACTIVE_HIGH;
+    }
+  else if (mode == IRQ_LOW_LEVEL)
+    {
+      trigger_mode = TRIGGER_LEVEL_ACTIVE_LOW;
+    }
+
+  data = up_ioapic_read(IOAPIC_REG_TABLE + (irq - IRQ0) * 2);
+
+  data &= ~TRIGGER_MODE_MASK;
+  data |= trigger_mode;
+
+  up_ioapic_write(IOAPIC_REG_TABLE + (irq - IRQ0) * 2, data);
+
+  return 0;
+}
+
+/****************************************************************************
+ * Name: up_affinity_irq
+ *
+ * Description:
+ *   Set an IRQ affinity by software.
+ *
+ ****************************************************************************/
+
+void up_affinity_irq(int irq, cpu_set_t cpuset)
+{
+  irqstate_t flags = spin_lock_irqsave(&g_irq_spinlock);
+  uint32_t data;
+  int cpu;
+
+  if (irq >= IRQ_MSI_START && irq <= g_msi_now)
+    {
+      /* Affinity for MSI is not supported now.
+       * For x86 this must be done on PCI level as MSI/MSI-X interrupts
+       * bypass IOAPIC.
+       */
+
+      spin_unlock_irqrestore(&g_irq_spinlock, flags);
+      return;
+    }
+
+  for (cpu = 0; cpu < CONFIG_NCPUS; cpu++)
+    {
+      if (CPU_ISSET(cpu, &cpuset))
+        {
+          data = x86_64_cpu_to_loapic(cpu) << 24;
+          up_ioapic_write(IOAPIC_REG_TABLE + (irq - IRQ0) * 2 + 1, data);
+          break;
+        }
+    }
+
+  spin_unlock_irqrestore(&g_irq_spinlock, flags);
+}
+
+/****************************************************************************
+ * Name: x86_64_icr_write
+ *
+ * Description:
+ *   Write ICR request
+ *
+ ****************************************************************************/
+
+void x86_64_icr_write(uint8_t cpu, uint32_t delivery)
+{
+#ifdef CONFIG_ARCH_X86_64_X2APIC
+  /* Get destination - must be LOAPIC id */
+
+  apic_write(APIC_ICR, delivery |
+             X2APIC_DESTINATION((uint64_t)x86_64_cpu_to_loapic(cpu)));
+#else
+  /* ICR high */
+
+  apic_write(APIC_ICR_HIGH, APIC_DESTINATION(x86_64_cpu_to_loapic(cpu)));
+
+  /* ICR low */
+
+  apic_write(APIC_ICR, delivery);
+#endif
 }

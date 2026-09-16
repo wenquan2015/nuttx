@@ -30,10 +30,13 @@ list(APPEND SRCS riscv_cpuinfo.c riscv_createstack.c riscv_doirq.c
 list(APPEND SRCS riscv_exit.c riscv_getintstack.c riscv_getnewintctx.c)
 list(APPEND SRCS riscv_initialize.c riscv_initialstate.c riscv_modifyreg32.c)
 list(APPEND SRCS riscv_nputs.c riscv_registerdump.c)
-list(APPEND SRCS riscv_releasestack.c riscv_schedulesigaction.c
-     riscv_sigdeliver.c)
+list(APPEND SRCS riscv_releasestack.c)
 list(APPEND SRCS riscv_stackframe.c riscv_tcbinfo.c riscv_swint.c)
 list(APPEND SRCS riscv_switchcontext.c riscv_usestack.c)
+
+if(CONFIG_ENABLE_ALL_SIGNALS)
+  list(APPEND SRCS riscv_schedulesigaction.c riscv_sigdeliver.c)
+endif()
 
 if(CONFIG_ONESHOT)
   list(APPEND SRCS riscv_mtimer.c)
@@ -66,8 +69,10 @@ if(CONFIG_ARCH_HAVE_DEBUG)
 endif()
 
 if(NOT CONFIG_BUILD_FLAT)
-  list(APPEND SRCS riscv_task_start.c riscv_pthread_start.c
-       riscv_signal_dispatch.c)
+  list(APPEND SRCS riscv_task_start.c riscv_pthread_start.c)
+  if(CONFIG_ENABLE_ALL_SIGNALS)
+    list(APPEND SRCS riscv_signal_dispatch.c)
+  endif()
   if(CONFIG_BUILD_PROTECTED)
     target_sources(arch_interface PRIVATE riscv_signal_handler.S)
   endif()
@@ -81,7 +86,7 @@ if(CONFIG_STACK_COLORATION)
   list(APPEND SRCS riscv_checkstack.c)
 endif()
 
-if(CONFIG_ARCH_HAVE_FORK)
+if(CONFIG_ARCH_HAVE_VFORK OR CONFIG_ARCH_HAVE_FORK)
   list(APPEND SRCS fork.S riscv_fork.c)
 endif()
 
@@ -135,3 +140,10 @@ if(CONFIG_ARCH_USE_S_MODE)
 endif()
 
 target_sources(arch PRIVATE ${SRCS})
+
+nuttx_add_aux_library(STARTUP_OBJS crt0.c)
+
+target_compile_options(
+  STARTUP_OBJS
+  PRIVATE
+    $<GENEX_EVAL:$<TARGET_PROPERTY:nuttx_global,NUTTX_ELF_APP_COMPILE_OPTIONS>>)

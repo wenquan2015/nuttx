@@ -31,6 +31,7 @@
 #include <setjmp.h>
 #include <syslog.h>
 #include <assert.h>
+#include <string.h>
 
 #include <nuttx/init.h>
 #include <nuttx/arch.h>
@@ -40,6 +41,9 @@
 #include <nuttx/syslog/syslog_rpmsg.h>
 
 #include "sim_internal.h"
+#ifdef CONFIG_SIM_HCISOCKET
+#  include "sim_hosthcisocket.h"
+#endif
 
 /****************************************************************************
  * Public Data
@@ -164,8 +168,62 @@ noprofile_function const char *__ubsan_default_options(void)
 
 int main(int argc, char **argv, char **envp)
 {
+#ifdef CONFIG_SIM_BSIM_TIME
+  const char *bsim_sim_id = CONFIG_SIM_BSIM_SIM_ID;
+  const char *bsim_phy_id = CONFIG_SIM_BSIM_PHY_ID;
+  unsigned int bsim_dev_nbr = CONFIG_SIM_BSIM_DEVICE_NBR;
+#endif
+  int i;
+
   g_argc = argc;
   g_argv = argv;
+
+  /* Parse simulator-specific options before handing control to NuttX.
+   * --sim-rt-ratio=<percent>  Set simulated-to-real time ratio in percent
+   *   (default 100).  Values > 100 speed up simulated time; < 100 slow down.
+   * --sim-bsim-sid=<id>  Override the BabbleSim simulation ID.
+   * --sim-bsim-pid=<id>  Override the BabbleSim PHY ID.
+   * --sim-bsim-dev=<n>   Override the BabbleSim device number.
+   */
+
+  for (i = 1; i < argc; i++)
+    {
+      if (strncmp(argv[i], "--sim-rt-ratio=", 15) == 0)
+        {
+          host_set_timeratio(atoi(argv[i] + 15));
+        }
+#ifdef CONFIG_SIM_HCISOCKET
+      else if (strncmp(argv[i], "--bt-dev=", 9) == 0)
+        {
+          if (host_bthcisock_configure(argv[i] + 9) < 0)
+            {
+              host_printf("invalid --bt-dev target: %s\n", argv[i] + 9);
+              return EXIT_FAILURE;
+            }
+        }
+#endif
+#ifdef CONFIG_SIM_BSIM_TIME
+      else if (strncmp(argv[i], "--sim-bsim-sid=", 15) == 0)
+        {
+          bsim_sim_id = argv[i] + 15;
+        }
+      else if (strncmp(argv[i], "--sim-bsim-pid=", 15) == 0)
+        {
+          bsim_phy_id = argv[i] + 15;
+        }
+      else if (strncmp(argv[i], "--sim-bsim-dev=", 15) == 0)
+        {
+          bsim_dev_nbr = atoi(argv[i] + 15);
+        }
+#endif
+    }
+
+#ifdef CONFIG_SIM_BSIM_TIME
+  if (host_bsimtime_init(bsim_sim_id, bsim_phy_id, bsim_dev_nbr) < 0)
+    {
+      return EXIT_FAILURE;
+    }
+#endif
 
 #ifdef CONFIG_ALLSYMS
   allsyms_relocate();

@@ -30,7 +30,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <inttypes.h>
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
@@ -48,12 +48,15 @@
 #include "esp_attr.h"
 #include "hal/mcpwm_hal.h"
 #include "hal/mcpwm_ll.h"
-#include "soc/mcpwm_periph.h"
-#include "soc/ledc_periph.h"
+#include "hal/mcpwm_periph.h"
+#include "hal/ledc_periph.h"
 #include "periph_ctrl.h"
 #include "hal/clk_tree_hal.h"
 #include "esp_clk_tree.h"
 #include "esp_private/esp_clk_tree_common.h"
+#ifdef CONFIG_PM
+#  include "include/esp_pm.h"
+#endif
 
 #ifdef CONFIG_ESP_MCPWM
 
@@ -162,6 +165,9 @@ struct mcpwm_dev_common_s
   bool initialized;          /* MCPWM periph. and HAL has been initialized */
   bool isr_initialized;      /* Shared ISR has been initialized */
   int group_prescale;
+#ifdef CONFIG_PM
+  esp_pm_lock_handle_t pm_lock;   /* Power management lock */
+#endif
 };
 
 #ifdef CONFIG_ESP_MCPWM_MOTOR
@@ -318,6 +324,9 @@ static struct mcpwm_dev_common_s g_mcpwm_common =
   .initialized         = false,
   .isr_initialized     = false,
   .group_prescale      = MCPWM_DEV_CLK_PRESCALE,
+#ifdef CONFIG_PM
+  .pm_lock             = NULL,
+#endif
 };
 
 /* Motor specific data structures */
@@ -417,7 +426,7 @@ static struct mcpwm_cap_channel_lowerhalf_s mcpwm_cap_ch2_lowerhalf =
  * Description:
  *   Configures the MCPWM operator and generator, setting the PWM clock and
  *   output pins.
- *   If required, also configures fault detection. When done, sets the the
+ *   If required, also configures fault detection. When done, sets the
  *   motor state to IDLE.
  *
  * Input Parameters:
@@ -537,6 +546,10 @@ static int esp_motor_shutdown(struct motor_lowerhalf_s *dev)
   esp_motor_fault_configure(priv, false);
 #endif
 
+#ifdef CONFIG_PM
+  esp_pm_lock_release(g_mcpwm_common.pm_lock);
+#endif
+
   spin_unlock_irqrestore(&g_mcpwm_common.mcpwm_spinlock, flags);
   return OK;
 }
@@ -641,6 +654,11 @@ static int esp_motor_start(struct motor_lowerhalf_s *dev)
   float duty;
 
   flags = spin_lock_irqsave(&g_mcpwm_common.mcpwm_spinlock);
+
+#ifdef CONFIG_PM
+  esp_pm_lock_acquire(g_mcpwm_common.pm_lock);
+#endif
+
   if (priv->state.state == MOTOR_STATE_RUN)
     {
       spin_unlock_irqrestore(&g_mcpwm_common.mcpwm_spinlock, flags);
@@ -1308,7 +1326,7 @@ static int esp_mcpwm_fault_gpio_config(struct mcpwm_motor_lowerhalf_s *lower,
   if (!enable)
     {
       esp_gpio_matrix_in(0x3a,
-        mcpwm_periph_signals.groups[MCPWM_CAPTURE_DEFAULT_GROUP].\
+        soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].\
         gpio_faults[lower->fault_id].fault_sig,
         false);
       return OK;
@@ -1323,7 +1341,7 @@ static int esp_mcpwm_fault_gpio_config(struct mcpwm_motor_lowerhalf_s *lower,
 
   esp_gpio_matrix_in(
     lower->fault_pin,
-    mcpwm_periph_signals.groups[MCPWM_CAPTURE_DEFAULT_GROUP].\
+    soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].\
     gpio_faults[lower->fault_id].fault_sig,
     false);
 
@@ -1385,13 +1403,13 @@ static int esp_mcpwm_motor_set_gpio(struct mcpwm_motor_lowerhalf_s *lower,
 
   esp_gpio_matrix_out(
     lower->generator_pins[MCPWM_GENERATOR_0],
-    mcpwm_periph_signals.groups[MCPWM_CAPTURE_DEFAULT_GROUP].\
+    soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].\
     operators[lower->channel_id].generators[MCPWM_GENERATOR_0].pwm_sig,
     false, false);
 
   esp_gpio_matrix_out(
     lower->generator_pins[MCPWM_GENERATOR_1],
-    mcpwm_periph_signals.groups[MCPWM_CAPTURE_DEFAULT_GROUP].\
+    soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].\
     operators[lower->channel_id].generators[MCPWM_GENERATOR_1].pwm_sig,
     false, false);
 
@@ -1399,14 +1417,12 @@ static int esp_mcpwm_motor_set_gpio(struct mcpwm_motor_lowerhalf_s *lower,
 
 #ifdef CONFIG_ESP_MCPWM_TEST_LOOPBACK
   esp_gpio_matrix_out(CONFIG_ESP_MCPWM_CAPTURE_CH0_GPIO,
-                      mcpwm_periph_signals.\
-                      groups[MCPWM_CAPTURE_DEFAULT_GROUP].\
+                      soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].\
                       operators[lower->channel_id].\
                       generators[MCPWM_GENERATOR_0].pwm_sig,
                       0, 0);
   esp_gpio_matrix_out(CONFIG_ESP_MCPWM_CAPTURE_CH1_GPIO,
-                      mcpwm_periph_signals.\
-                      groups[MCPWM_CAPTURE_DEFAULT_GROUP].\
+                      soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].\
                       operators[lower->channel_id].\
                       generators[MCPWM_GENERATOR_1].pwm_sig,
                       0, 0);
@@ -1451,6 +1467,10 @@ static int esp_capture_start(struct cap_lowerhalf_s *lower)
   irqstate_t flags;
   mcpwm_hal_context_t *hal = &priv->common->hal;
   flags = spin_lock_irqsave(&priv->common->mcpwm_spinlock);
+
+#ifdef CONFIG_PM
+  esp_pm_lock_acquire(g_mcpwm_common.pm_lock);
+#endif
 
   /* Enable channel and interruption for rising edge */
 
@@ -1513,6 +1533,10 @@ static int esp_capture_stop(struct cap_lowerhalf_s *lower)
                        MCPWM_LL_EVENT_CAPTURE(priv->channel_id),
                        false);
   priv->enabled = false;
+
+#ifdef CONFIG_PM
+  esp_pm_lock_release(g_mcpwm_common.pm_lock);
+#endif
 
   spin_unlock_irqrestore(&priv->common->mcpwm_spinlock, flags);
   cpinfo("Channel disabled: %d\n", priv->channel_id);
@@ -1691,7 +1715,8 @@ static int esp_mcpwm_capture_set_gpio(
     }
 
   esp_gpio_matrix_in(lower->gpio_pin,
-    mcpwm_periph_signals.groups[0].captures[lower->channel_id].cap_sig,
+    soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].\
+      captures[lower->channel_id].cap_sig,
     false);
 
   cpinfo("GPIO: %d configured for channel %d\n", lower->gpio_pin,
@@ -1717,32 +1742,25 @@ static int esp_mcpwm_capture_set_gpio(
  ****************************************************************************/
 
 #if defined(CONFIG_ESP_MCPWM_CAPTURE) || defined(ESP_MCPMW_MOTOR_FAULT)
-static int esp_mcpwm_isr_register(int (*fn)(int, void *, void *),
-                                          void *arg)
+static int esp_mcpwm_isr_register(int (*fn)(int, void *, void *), void *arg)
 {
   int cpuint;
   int ret;
 
-  cpuint = esp_setup_irq(mcpwm_periph_signals.groups[0].irq_id,
+  cpuint = esp_setup_irq(soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].\
+                         irq_id,
                          ESP_IRQ_PRIORITY_DEFAULT,
-                         ESP_IRQ_TRIGGER_LEVEL);
+                         ESP_IRQ_TRIGGER_LEVEL,
+                         fn,
+                         arg);
   if (cpuint < 0)
     {
       cperr("Failed to allocate a CPU interrupt.\n");
       return -ENOMEM;
     }
 
-  ret = irq_attach(ESP_SOURCE2IRQ(mcpwm_periph_signals.groups[0].irq_id),
-                   fn,
-                   &g_mcpwm_common);
-  if (ret < 0)
-    {
-      cperr("Couldn't attach IRQ to handler.\n");
-      esp_teardown_irq(mcpwm_periph_signals.groups[0].irq_id, cpuint);
-      return ret;
-    }
-
-  up_enable_irq(ESP_SOURCE2IRQ(mcpwm_periph_signals.groups[0].irq_id));
+  up_enable_irq(ESP_SOURCE2IRQ(
+                  soc_mcpwm_signals[MCPWM_CAPTURE_DEFAULT_GROUP].irq_id));
 
   return ret;
 }
@@ -1963,6 +1981,16 @@ struct motor_lowerhalf_s *esp_motor_bdc_initialize(int channel,
 
   if (!g_mcpwm_common.initialized)
     {
+#ifdef CONFIG_PM
+      ret = esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0,
+                               "mcpwm", &g_mcpwm_common.pm_lock);
+      if (ret != OK)
+        {
+          mtrerr("Failed to create MCPWM PM lock\n");
+          return NULL;
+        }
+#endif
+
       esp_mcpwm_group_start();
     }
 
@@ -2036,6 +2064,9 @@ struct cap_lowerhalf_s *esp_mcpwm_capture_initialize(int channel, int pin)
 {
   struct mcpwm_cap_channel_lowerhalf_s *lower = NULL;
   uint32_t group_clock;
+#ifdef CONFIG_PM
+  int ret;
+#endif
 
   /* Single time initialization for the entire MCPWM Peripheral
    * and MCPWM Capture group.
@@ -2043,6 +2074,16 @@ struct cap_lowerhalf_s *esp_mcpwm_capture_initialize(int channel, int pin)
 
   if (!g_mcpwm_common.initialized)
     {
+#ifdef CONFIG_PM
+      ret = esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0,
+                               "mcpwm", &g_mcpwm_common.pm_lock);
+      if (ret != OK)
+        {
+          mtrerr("Failed to create MCPWM PM lock\n");
+          return NULL;
+        }
+#endif
+
       esp_mcpwm_group_start();
     }
 

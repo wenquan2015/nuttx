@@ -30,7 +30,7 @@
 #include <sys/ioctl.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <string.h>
 #include <errno.h>
 #include <netinet/in.h>
@@ -515,7 +515,7 @@ int32_t ipv6_fragin(FAR struct net_driver_s *dev)
        */
 
       ipv6_fragin_reassemble(node);
-      netdev_iob_replace(dev, node->outgoframe);
+      netdev_iob_replace_l2(dev, node->outgoframe);
 
       /* Free the memory of node */
 
@@ -662,7 +662,7 @@ int32_t ipv6_fragout(FAR struct net_driver_s *dev, uint16_t mtu)
   g_netstats.ipv6.sent += nfrags - 1;
 #endif
 
-  netdev_txnotify_dev(dev);
+  netdev_txnotify_dev(dev, IPFRAG_POLL);
 
   return OK;
 

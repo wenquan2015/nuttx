@@ -26,7 +26,7 @@
 
 #include <nuttx/config.h>
 
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <fcntl.h>
 #include <syslog.h>
 #include <sys/ioctl.h>
@@ -37,6 +37,8 @@
 #include <nuttx/fs/fs.h>
 
 #include "esp_board_ledc.h"
+
+#include "espressif/esp_start.h"
 
 #ifdef CONFIG_ESPRESSIF_ADC
 #  include "esp_board_adc.h"
@@ -51,7 +53,7 @@
 #endif
 
 #ifdef CONFIG_TIMER
-#  include "espressif/esp_timer.h"
+#  include "espressif/esp_gptimer.h"
 #endif
 
 #ifdef CONFIG_ONESHOT
@@ -127,6 +129,10 @@
 #  include "espressif/esp_sha.h"
 #endif
 
+#ifdef CONFIG_ESPRESSIF_AES_ACCELERATOR
+#  include "espressif/esp_aes.h"
+#endif
+
 #ifdef CONFIG_MMCSD_SPI
 #  include "esp_board_mmcsd.h"
 #endif
@@ -157,9 +163,6 @@
  *
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
- *
- *   CONFIG_BOARD_LATE_INITIALIZE=y && CONFIG_BOARDCTL=y :
- *     Called from the NSH library via board_app_initialize().
  *
  * Input Parameters:
  *   None.

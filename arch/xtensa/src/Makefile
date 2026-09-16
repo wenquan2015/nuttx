@@ -135,9 +135,9 @@ VPATH += common/espressif
 VPATH += $(ARCH_SUBDIR)
 VPATH += $(CHIP_DIR)
 
-all: $(STARTUP_OBJS) libarch$(LIBEXT)
+vpath nuttx$(EXEEXT) $(TOPDIR)
 
-.PHONY: board/libboard$(LIBEXT)
+all: $(STARTUP_OBJS) libarch$(LIBEXT)
 
 $(AOBJS) $(UAOBJS) $(HEAD_AOBJ): %$(OBJEXT): %.S
 	$(call ASSEMBLE, $<, $@)
@@ -150,17 +150,21 @@ $(STARTUP_ELF_OBJS): %$(OBJEXT): %.c
 
 ifeq ($(CONFIG_BUILD_FLAT),y)
 $(BIN): $(STARTUP_ELF_OBJS) $(OBJS)
-	$(call ARCHIVE, $@, $(OBJS))
+	$(call ARCHIVE_REBUILD, $@, $(OBJS))
 else
 $(BIN): $(STARTUP_ELF_OBJS) $(UOBJS)
-	$(call ARCHIVE, $@, $(UOBJS))
+	$(call ARCHIVE_REBUILD, $@, $(UOBJS))
 endif
 
 $(KBIN): $(OBJS)
-	$(call ARCHIVE, $@, $(OBJS))
+	$(call ARCHIVE_REBUILD, $@, $(OBJS))
 
-board/libboard$(LIBEXT):
+board/libboard$(LIBEXT): FORCE
 	$(Q) $(MAKE) -C board libboard$(LIBEXT) EXTRAFLAGS="$(EXTRAFLAGS)"
+
+.PHONY: FORCE
+
+FORCE:
 
 define LINK_ALLSYMS
 	$(Q) $(TOPDIR)/tools/mkallsyms.py $(NUTTX) allsyms.tmp --orderbyname $(CONFIG_SYMTAB_ORDEREDBYNAME)
@@ -171,10 +175,10 @@ define LINK_ALLSYMS
 	$(Q) $(call DELFILE, allsyms.tmp allsyms$(OBJEXT))
 endef
 
-$(addsuffix .tmp,$(ARCHSCRIPT)): $(ARCHSCRIPT)
+$(addsuffix .tmp,$(ARCHSCRIPT)): $(ARCHSCRIPT) $(TOPDIR)$(DELIM).config
 	$(call PREPROCESS, $(patsubst %.tmp,%,$@), $@)
 
-nuttx$(EXEEXT): $(STARTUP_OBJS) board/libboard$(LIBEXT) $(addsuffix .tmp,$(ARCHSCRIPT))
+nuttx$(EXEEXT): $(STARTUP_OBJS) board/libboard$(LIBEXT) $(addsuffix .tmp,$(ARCHSCRIPT)) $(addprefix $(TOPDIR)$(DELIM)staging$(DELIM),$(LINKLIBS))
 	$(Q) echo "LD: nuttx"
 ifneq ($(CONFIG_ALLSYMS),y)
 	$(Q) $(LD) --entry=__start $(LDFLAGS) $(LIBPATHS) $(EXTRA_LIBPATHS) \
@@ -193,13 +197,22 @@ ifneq ($(CONFIG_WINDOWS_NATIVE),y)
 	grep -v '\(compiled\)\|\(\$(OBJEXT)$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | \
 	sort > $(TOPDIR)/System.map
 endif
-	$(Q) $(call DELFILE, $(addsuffix .tmp,$(ARCHSCRIPT)))
 
 # This is part of the top-level export target
+#
+# A kernel build links its user programs outside this tree, against the
+# export package, so crt0 has to travel with it:  apps/import expects to
+# find it as startup/crt0.o.
 
-export_startup: $(STARTUP_OBJS)
+ifeq ($(CONFIG_BUILD_KERNEL),y)
+EXPORT_STARTUP_OBJS = $(STARTUP_OBJS) $(STARTUP_ELF_OBJS)
+else
+EXPORT_STARTUP_OBJS = $(STARTUP_OBJS)
+endif
+
+export_startup: $(EXPORT_STARTUP_OBJS)
 	$(Q) if [ -d "$(EXPORT_DIR)/startup" ]; then \
-		cp -f $(STARTUP_OBJS) "$(EXPORT_DIR)/startup"; \
+		cp -f $(EXPORT_STARTUP_OBJS) "$(EXPORT_DIR)/startup"; \
 	 else \
 		echo "$(EXPORT_DIR)/startup does not exist"; \
 		exit 1; \
@@ -235,6 +248,7 @@ distclean:: clean
 ifeq ($(BOARDMAKE),y)
 	$(Q) $(MAKE) -C board distclean
 endif
+	$(call DELFILE, $(CSRCS:.c=.ddc) $(ASRCS:.S=.dds) $(HEAD_CSRC:.c=.ddc) $(HEAD_ASRC:.S=.dds))
 	$(call DELFILE, Make.dep)
 	$(call DELFILE, .depend)
 

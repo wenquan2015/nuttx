@@ -32,7 +32,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <netinet/in.h>
 #include <net/if.h>
@@ -173,12 +173,12 @@ static void sendto_request(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
-                                    FAR void *pvpriv, uint16_t flags)
+static uint32_t sendto_eventhandler(FAR struct net_driver_s *dev,
+                                    FAR void *pvpriv, uint32_t flags)
 {
   FAR struct icmp_sendto_s *pstate = pvpriv;
 
-  ninfo("flags: %04x\n", flags);
+  ninfo("flags: %" PRIx32 "\n", flags);
 
   if (pstate != NULL)
     {
@@ -265,7 +265,7 @@ end_wait:
  *
  ****************************************************************************/
 
-ssize_t icmp_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
+ssize_t icmp_sendmsg(FAR struct socket *psock, FAR const struct msghdr *msg,
                      int flags)
 {
   FAR const void *buf = msg->msg_iov->iov_base;
@@ -403,16 +403,15 @@ ssize_t icmp_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
 
       /* Notify the device driver of the availability of TX data */
 
-      conn_dev_unlock(&conn->sconn, dev);
-      netdev_txnotify_dev(dev);
+      netdev_txnotify_dev(dev, ICMP_POLL);
 
       /* Wait for either the send to complete or for timeout to occur.
-       * net_sem_timedwait will also terminate if a signal is received.
+       * conn_dev_sem_timedwait will also terminate if a signal is received.
        */
 
-      ret = net_sem_timedwait(&state.snd_sem,
-                          _SO_TIMEOUT(conn->sconn.s_sndtimeo));
-      conn_dev_lock(&conn->sconn, dev);
+      ret = conn_dev_sem_timedwait(&state.snd_sem, true,
+                                   _SO_TIMEOUT(conn->sconn.s_sndtimeo),
+                                   &conn->sconn, dev);
       if (ret < 0)
         {
           if (ret == -ETIMEDOUT)

@@ -17,9 +17,9 @@ Supported MCUs
 ===========  ======= ================
 MCU          Support Note
 ===========  ======= ================
-STM32H503     No
+STM32H503     Yes
 STM32H523     No
-STM32H533     No
+STM32H533     Yes
 STM32H562     No
 STM32H563     Yes
 STM32H573     No
@@ -49,26 +49,26 @@ OCTOSPI     Yes      Implemented as QSPI.
 PWR         Yes      Partial.
 SPI         Yes
 TIM         Yes
-USB_FS      Yes      USB Device Support.
+USB_FS      Yes      USB Device and Host Support.
 
 AES         No
 CEC         No
 CORDIC      No
-CRC         No
+CRC         Yes
 CRS         No
 DAC         No
 DBG         No
 DCACHE      No
 DCMI        No
 DLYB        No
-EXTI        No
+EXTI        Yes
 FMAC        No
 FSMC        No
 GTZC        No
 HASH        No
 I3C         No
-IWDG        No
-LPTIM       No
+IWDG        Yes
+LPTIM       Yes
 OTFDEC      No
 PKA         No
 PSSI        No
@@ -82,9 +82,29 @@ SAI         No
 TAMP        No
 UCPD        No
 VREFBUF     No
-WWDG        No
+WWDG        Yes
 
 ==========  =======  =====
+
+USB FS Host
+-----------
+
+STM32 USB FS Host Driver Support. The STM32H5 is equipped with a Dual Role USB device
+capable of operating as a device or host. 
+
+Pre-requisites:
+
+- CONFIG_USBHOST         - Enable USB host support
+- CONFIG_STM32_USBFS_HOST  - Enable the STM32 USB OTG FS block in host mode
+
+USB host requires a stable 48MHz clock. This should come from a PLL driven by the HSE.
+HSI48 cannot be reliably used in host mode due to drift. It can only be used in device mode.
+
+Options:
+
+- STM32H5_USBDRD_NCHANNELS - Number of host channels. Default 8
+
+- STM32H5_USBDRD_DESCSIZE - Maximum size of a descriptor.  Default: 128
 
 References
 =================

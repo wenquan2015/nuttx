@@ -196,9 +196,13 @@ config ESP32_XTAL_26MHz
 endchoice # On-board Crystal Frequency
 
 config ESP32_RT_TIMER
-	bool "Real-time Timer"
+	bool "Real-Time Timer"
 	default n
-	select ESP32_TIMER0
+	select ESPRESSIF_HR_TIMER
+	---help---
+		Deprecated: Use ESPRESSIF_HR_TIMER instead.
+		This option is kept for backward compatibility and automatically
+		selects the common ESPRESSIF_HR_TIMER configuration.
 
 config ESP32_RUN_IRAM
 	bool "Run from IRAM"
@@ -277,6 +281,8 @@ endif # ESP32_OPENETH
 config ESP32_I2C
 	bool
 	default n
+	select I2C
+	select I2C_DRIVER
 
 config ESP32_TWAI
 	bool
@@ -287,7 +293,6 @@ config ESP32_LEDC
 	bool "LEDC (PWM)"
 	default n
 	select PWM
-	select ARCH_HAVE_PWM_MULTICHAN
 	---help---
 		Enable support to PWM on ESP32 using LEDC peripheral.
 
@@ -334,7 +339,7 @@ config ESP32_I2S0
 	bool "I2S 0"
 	default n
 	select ARCH_DMA
-	select ESP32_GPIO_IRQ
+	select ESPRESSIF_GPIO_IRQ
 	select ESPRESSIF_I2S0
 
 if ESP32_I2S0
@@ -464,7 +469,7 @@ config ESP32_I2S1
 	bool "I2S 1"
 	default n
 	select ARCH_DMA
-	select ESP32_GPIO_IRQ
+	select ESPRESSIF_GPIO_IRQ
 	select ESPRESSIF_I2S1
 
 if ESP32_I2S1
@@ -616,7 +621,7 @@ config ESP32_SPI2
 	bool "SPI 2"
 	default n
 	select ESP32_SPI
-	select ESP32_GPIO_IRQ
+	select ESPRESSIF_GPIO_IRQ
 	select SPI
 	select ESPRESSIF_SPI_PERIPH
 
@@ -624,7 +629,7 @@ config ESP32_SPI3
 	bool "SPI 3"
 	default n
 	select ESP32_SPI
-	select ESP32_GPIO_IRQ
+	select ESPRESSIF_GPIO_IRQ
 	select SPI
 	select ESPRESSIF_SPI_PERIPH
 
@@ -750,7 +755,7 @@ config ESP32_I2C1
 	default n
 	select ESP32_I2C
 
-	config ESP32_I2C_PERIPH_MASTER_MODE
+config ESP32_I2C_PERIPH_MASTER_MODE
 	bool
 	depends on (ESP32_I2C0_MASTER_MODE || ESP32_I2C1_MASTER_MODE)
 	default n
@@ -827,11 +832,15 @@ menu "Interrupt Configuration"
 config ESP32_IRAM_ISR_DEBUG
 	bool "Enable debugging of the IRAM-enabled interrupts"
 	default n
+	select ESPRESSIF_IRAM_ISR_DEBUG
 	---help---
 		This option enables keeping track of the IRAM-enabled interrupts by
 		registering its execution when non-IRAM interrupts are disabled. It
 		keeps track of the IRQ executed and register how many times since
 		boot it was executed.
+
+		This option is kept for backwards compatibility and automatically
+		selects CONFIG_ESPRESSIF_IRAM_ISR_DEBUG.
 
 endmenu # Interrupt Configuration
 
@@ -884,16 +893,29 @@ config ESP32_RTC_HEAP
 config ESP32_IRAM_HEAP
 	bool "Use the rest of IRAM as a separate heap"
 	select ARCH_HAVE_EXTRA_HEAPS
-	select LIBC_ARCH_ATOMIC
+	select LIBC_ATOMIC_IRQ
+	select ARCH_USE_TEXT_HEAP
 	default n
+
+config ESP32_DONT_USE_ROM_LIBC
+	bool "Don't use ROM libc functions"
+	default n
+	---help---
+		If enabled, NuttX libc will be used instead of ROM newlib
+		functions (strdup, strndup, atoi, etc.).
+
+		This is required when using flat build with USER_HEAP mode
+		to avoid heap allocation issues with ROM strdup.
 
 endmenu # Memory Configuration
 
 config ESP32_GPIO_IRQ
 	bool "GPIO pin interrupts"
+	select ESPRESSIF_GPIO_IRQ
 	default n
 	---help---
-		Enable support for interrupting GPIO pins
+		This is a deprecated Kconfig macro. Its kept for retrocompatibility only.
+		Use "CONFIG_ESPRESSIF_GPIO_IRQ" instead.
 
 config ESP32_RTCIO_IRQ
 	bool "RTC IO interrupts"
@@ -1916,6 +1938,7 @@ config ESP32_SPI_FLASH_SUPPORT_PSRAM_STACK
 	default n
 	depends on ESP32_SPIRAM
 	select SCHED_LPWORK
+	select ESP32_DONT_USE_ROM_LIBC
 	---help---
 		Enable this option, Tasks which use PSRAM as stack
 		can do SPI Flash read/write/erase/map/unmap.
@@ -2201,26 +2224,6 @@ config ESP32_PHY_INIT_DATA_ERROR
 endif
 
 endmenu # PHY
-
-menu "Real-Time Timer"
-	depends on ESP32_RT_TIMER
-
-config ESP32_RT_TIMER_TASK_NAME
-	string "Timer task name"
-	default "rt_timer"
-
-config ESP32_RT_TIMER_TASK_PRIORITY
-	int "Timer task priority"
-	default 223
-	---help---
-		Priority level of the RT Timer task.
-		Must be lower than the SCHED_HPWORKPRIORITY.
-
-config ESP32_RT_TIMER_TASK_STACK_SIZE
-	int "Timer task stack size"
-	default 2048
-
-endmenu # Real-Time Timer
 
 if ESP32_TIMER
 menu "Timer/counter Configuration"
@@ -2877,12 +2880,9 @@ endmenu # Application Image Configuration
 config ESP32_AUTO_SLEEP
 	bool "Auto-sleep"
 	default n
-	select PM
-	select ESP32_RT_TIMER
-	select ESP32_TIMER0
-	select ESP32_TICKLESS
+	select ESPRESSIF_AUTO_SLEEP
 	---help---
-		Enable ESP32 Auto-sleep
+		This is a deprecated option. Use ESPRESSIF_AUTO_SLEEP instead.
 
 config ESP32_TICKLESS
 	bool "Enable ESP32 tickless OS"

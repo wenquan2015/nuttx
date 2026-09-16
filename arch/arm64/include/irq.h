@@ -40,13 +40,13 @@
 #  include <nuttx/macro.h>
 #endif
 
-/* Include NuttX-specific IRQ definitions */
-
-#include <nuttx/irq.h>
-
 /* Include chip-specific IRQ definitions (including IRQ numbers) */
 
 #include <arch/chip/irq.h>
+
+/* Include NuttX-specific IRQ definitions */
+
+#include <nuttx/irq.h>
 
 /****************************************************************************
  * Pre-processor Prototypes
@@ -243,6 +243,10 @@
 
 #define IRQ_SPSR_MASK       (IRQ_DAIF_MASK << 6)
 
+/* AArch64 the stack-pointer must be 128-bit aligned */
+
+#define STACKFRAME_ALIGN    16
+
 #ifndef __ASSEMBLY__
 
 #ifdef __cplusplus
@@ -259,7 +263,12 @@ extern "C"
 
 struct xcptcontext
 {
-#ifdef CONFIG_BUILD_KERNEL
+#ifdef CONFIG_ENABLE_ALL_SIGNALS
+  /* task context, for signal process */
+
+  uint64_t *saved_regs;
+
+#if defined(CONFIG_BUILD_KERNEL) || defined(CONFIG_BUILD_PROTECTED)
   /* This is the saved address to use when returning from a user-space
    * signal handler.
    */
@@ -267,6 +276,7 @@ struct xcptcontext
   uintptr_t sigreturn;
 
 #endif
+#endif /* CONFIG_ENABLE_ALL_SIGNALS */
   /* task stack reg context */
 
   uint64_t *regs;
@@ -274,9 +284,20 @@ struct xcptcontext
   uint64_t *initregs;
 #endif
 
-  /* task context, for signal process */
+#ifdef CONFIG_LIB_SYSCALL
+  /* The caller's register context, as saved by the SVC exception entry, for
+   * the duration of a system call.  This is what the *user* was doing when
+   * it trapped, as opposed to `regs' above, which during a system call
+   * describes the kernel.
+   *
+   * vfork() and fork() need it:  they are reached through a system call, so
+   * the return address and stack pointer their architecture entry point can
+   * see for itself are the kernel's, and a child built from those would
+   * resume at a kernel address on a kernel stack.
+   */
 
-  uint64_t *saved_regs;
+  uint64_t *sregs;
+#endif
 
 #ifdef CONFIG_ARCH_FPU
   uint64_t *fpu_regs;

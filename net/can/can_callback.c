@@ -28,7 +28,7 @@
 #if defined(CONFIG_NET) && defined(CONFIG_NET_CAN)
 
 #include <stdint.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/net/netconfig.h>
 #include <nuttx/net/netdev.h>
@@ -62,13 +62,13 @@
  *
  ****************************************************************************/
 
-static inline uint16_t
+static inline uint32_t
 can_data_event(FAR struct net_driver_s *dev, FAR struct can_conn_s *conn,
-               uint16_t flags)
+               uint32_t flags)
 {
   int buflen = dev->d_len;
-  uint16_t recvlen;
-  uint16_t ret;
+  int recvlen;
+  uint32_t ret;
 
 #ifdef CONFIG_NET_TIMESTAMP
   buflen -= sizeof(struct timeval);
@@ -92,6 +92,7 @@ can_data_event(FAR struct net_driver_s *dev, FAR struct can_conn_s *conn,
 #ifdef CONFIG_NET_STATISTICS
       g_netstats.can.drop++;
 #endif
+      NETDEV_RXDROPPED(dev);
     }
 
   /* In any event, the new data has now been handled */
@@ -118,41 +119,40 @@ can_data_event(FAR struct net_driver_s *dev, FAR struct can_conn_s *conn,
  *
  ****************************************************************************/
 
-uint16_t can_callback(FAR struct net_driver_s *dev,
-                      FAR struct can_conn_s *conn, uint16_t flags)
+uint32_t can_callback(FAR struct net_driver_s *dev,
+                      FAR struct can_conn_s *conn, uint32_t flags)
 {
   /* Some sanity checking */
 
   if (conn)
     {
 #ifdef CONFIG_NET_TIMESTAMP
-          /* TIMESTAMP sockopt is activated,
-           * create timestamp and copy to iob
-           */
+      /* TIMESTAMP sockopt is activated,
+       * create timestamp and copy to iob
+       */
 
-          if (_SO_GETOPT(conn->sconn.s_options, SO_TIMESTAMP) &&
-            (dev->d_iob != NULL))
+      if (_SO_GETOPT(conn->sconn.s_options, SO_TIMESTAMP) &&
+        (dev->d_iob != NULL))
+        {
+          struct timeval tv;
+          FAR struct timespec *ts = (FAR struct timespec *)&tv;
+          int len;
+
+          clock_systime_timespec(ts);
+          tv.tv_usec = ts->tv_nsec / 1000;
+
+          len = iob_trycopyin(dev->d_iob, (FAR uint8_t *)&tv,
+                              sizeof(struct timeval),
+                              -CONFIG_NET_LL_GUARDSIZE, false);
+          if (len == sizeof(struct timeval))
             {
-              struct timeval tv;
-              FAR struct timespec *ts = (FAR struct timespec *)&tv;
-              int len;
-
-              clock_systime_timespec(ts);
-              tv.tv_usec = ts->tv_nsec / 1000;
-
-              len = iob_trycopyin(dev->d_iob, (FAR uint8_t *)&tv,
-                                  sizeof(struct timeval),
-                                  -CONFIG_NET_LL_GUARDSIZE, false);
-              if (len == sizeof(struct timeval))
-                {
-                  dev->d_len += len;
-                }
+              dev->d_len += len;
             }
+        }
 #endif
 
       conn_lock(&conn->sconn);
       flags = devif_conn_event(dev, flags, conn->sconn.list);
-      conn_unlock(&conn->sconn);
 
       /* Either we did not get the lock or there is no application listening
        * If we did not get a lock we store the frame in the read-ahead buffer
@@ -164,6 +164,8 @@ uint16_t can_callback(FAR struct net_driver_s *dev,
 
           flags = can_data_event(dev, conn, flags);
         }
+
+      conn_unlock(&conn->sconn);
     }
 
   return flags;
@@ -193,8 +195,8 @@ uint16_t can_callback(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-uint16_t can_datahandler(FAR struct net_driver_s *dev,
-                         FAR struct can_conn_s *conn)
+int can_datahandler(FAR struct net_driver_s *dev,
+                    FAR struct can_conn_s *conn)
 {
   FAR struct iob_s *iob = dev->d_iob;
   int ret = 0;

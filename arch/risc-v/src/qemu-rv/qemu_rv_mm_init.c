@@ -29,8 +29,9 @@
 #include <nuttx/nuttx.h>
 
 #include <stdint.h>
+#include <string.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <arch/board/board_memorymap.h>
 
@@ -82,7 +83,7 @@
 
 #define PGT_L1_SIZE     (512)  /* Enough to map 512 GiB */
 #define PGT_L2_SIZE     (512)  /* Enough to map 1 GiB */
-#define PGT_L3_SIZE     (1024) /* Enough to map 4 MiB (2MiB x 2) */
+#define PGT_L3_SIZE     (2048) /* Enough to map 8 MiB (2MiB x 4) */
 
 #define SLAB_COUNT      (sizeof(m_l3_pgtable) / RV_MMU_PAGE_SIZE)
 
@@ -173,6 +174,7 @@ static void slab_init(uintptr_t start)
 static uintptr_t slab_alloc(void)
 {
   pgalloc_slab_t *slab = (pgalloc_slab_t *)sq_remfirst(&g_free_slabs);
+
   return slab ? (uintptr_t)slab->memory : 0;
 }
 
@@ -245,6 +247,14 @@ static void map_region(uintptr_t paddr, uintptr_t vaddr, size_t size,
 
 void qemu_rv_kernel_mappings(void)
 {
+  /* Clear page tables */
+
+  memset(m_l1_pgtable, 0, sizeof(m_l1_pgtable));
+  memset(m_l2_pgtable, 0, sizeof(m_l2_pgtable));
+#ifdef CONFIG_ARCH_MMU_TYPE_SV39
+  memset(m_l3_pgtable, 0, sizeof(m_l3_pgtable));
+#endif
+
   /* Initialize slab allocator for the L2/L3 page tables */
 
   slab_init(KMM_PBASE);

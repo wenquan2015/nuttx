@@ -303,10 +303,13 @@ tricore_systimer_initialize(volatile void *tbase, int irq, uint64_t freq)
   struct tricore_systimer_lowerhalf_s *priv = &g_tricore_oneshot_lowerhalf;
 
   priv->tbase = tbase;
+  spin_lock_init(&priv->lock);
 
   ASSERT(freq <= UINT32_MAX);
 
   oneshot_count_init(&priv->lower, (uint32_t)freq);
+
+  IfxStm_setSuspendMode(priv->tbase, IfxStm_SuspendMode_hard);
 
   IfxStm_setCompareControl(tbase,
       IfxStm_Comparator_0,

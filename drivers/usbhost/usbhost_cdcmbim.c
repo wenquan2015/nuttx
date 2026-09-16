@@ -32,7 +32,7 @@
 #include <semaphore.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <poll.h>
 #include <fcntl.h>
 
@@ -1581,7 +1581,7 @@ static inline int usbhost_devinit(FAR struct usbhost_cdcmbim_s *priv)
 
       uinfo("Register character driver\n");
       usbhost_mkdevname(priv, devname);
-      ret = register_driver(devname, &g_cdcwdm_fops, 0666, priv);
+      ret = register_driver(devname, &g_cdcwdm_fops, 0600, priv);
     }
 
   if (priv->intin)
@@ -2209,7 +2209,7 @@ static void cdcmbim_receive(FAR struct usbhost_cdcmbim_s *priv,
 {
   uinfo("received packet: %d len\n", len);
 
-  net_lock();
+  netdev_lock(&priv->netdev);
 
   NETDEV_RXPACKETS(&priv->netdev);
 
@@ -2249,7 +2249,7 @@ static void cdcmbim_receive(FAR struct usbhost_cdcmbim_s *priv,
       NETDEV_RXERRORS(dev);
     }
 
-  net_unlock();
+  netdev_unlock(&priv->netdev);
 }
 
 /****************************************************************************
@@ -2347,6 +2347,9 @@ static int cdcmbim_ifup(FAR struct net_driver_s *dev)
     }
 
   priv->bifup = true;
+
+  netdev_lower_carrier_on(dev);
+
   return OK;
 }
 
@@ -2379,6 +2382,9 @@ static int cdcmbim_ifdown(FAR struct net_driver_s *dev)
   priv->bifup = false;
 
   spin_unlock_irqrestore(&priv->spinlock, flags);
+
+  netdev_lower_carrier_off(dev);
+
   return OK;
 }
 
@@ -2405,7 +2411,7 @@ static void cdcmbim_txavail_work(FAR void *arg)
 {
   FAR struct usbhost_cdcmbim_s *priv = (FAR struct usbhost_cdcmbim_s *)arg;
 
-  net_lock();
+  netdev_lock(&priv->netdev);
 
   priv->netdev.d_buf = (FAR uint8_t *)priv->txpktbuf;
 
@@ -2414,7 +2420,7 @@ static void cdcmbim_txavail_work(FAR void *arg)
       devif_poll(&priv->netdev, cdcmbim_txpoll);
     }
 
-  net_unlock();
+  netdev_unlock(&priv->netdev);
 }
 
 /****************************************************************************

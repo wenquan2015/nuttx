@@ -44,6 +44,19 @@
 #  define CONFIG_LIBC_ELF_MAXDEPEND  0
 #endif
 
+/* A compacting filesystem gives its media address with a pin that holds the
+ * blocks in place.  The loader holds the pin through a file reference,
+ * because the unload runs on another task.
+ *
+ * That reference is taken with file_get() and file_dup2(), which are kernel
+ * side, so this is for the copy of libc that runs there.
+ */
+
+#if defined(CONFIG_FS_PIN) && \
+    (defined(CONFIG_BUILD_FLAT) || defined(__KERNEL__))
+#  define HAVE_LIBC_ELF_PIN 1
+#endif
+
 #ifndef CONFIG_LIBC_ELF_ALIGN_LOG2
 #  define CONFIG_LIBC_ELF_ALIGN_LOG2 2
 #endif
@@ -79,7 +92,12 @@
  *   portion of the build
  */
 
-#if defined(CONFIG_BUILD_FLAT) || defined(__KERNEL__)
+/* dlopen() needs a name too: it is the only way to tell that a library is
+ * already loaded.
+ */
+
+#if defined(CONFIG_BUILD_FLAT) || defined(__KERNEL__) || \
+    defined(CONFIG_LIBC_DLFCN)
 #  define HAVE_LIBC_ELF_NAMES
 #  define LIBC_ELF_NAMEMAX NAME_MAX
 #endif
@@ -118,6 +136,7 @@ typedef CODE int (*mod_uninitializer_t)(FAR void *arg);
  *   nexports      - The number of symbols in the exported symbol table.
  */
 
+struct file;
 struct symtab_s;
 struct mod_info_s
 {
@@ -149,6 +168,8 @@ typedef CODE int (*mod_initializer_t)(FAR struct mod_info_s *modinfo);
 struct module_s;
 typedef CODE int (*mod_callback_t)(FAR struct module_s *modp, FAR void *arg);
 
+struct fdpic_desc_s;
+
 /* This describes the file to be loaded. */
 
 struct module_s
@@ -173,6 +194,12 @@ struct module_s
   size_t textsize;                     /* Size of the kernel .text memory allocation */
   size_t datasize;                     /* Size of the kernel .bss/.data memory allocation */
 #endif
+
+  uint8_t nopen;                       /* Outstanding references: insmod()
+                                        * and dlopen() each take one, rmmod()
+                                        * and dlclose() give one back, and the
+                                        * module goes when the last does
+                                        */
 
 #if CONFIG_LIBC_ELF_MAXDEPEND > 0
   uint8_t dependents;                  /* Number of modules that depend on this module */
@@ -235,11 +262,37 @@ struct mod_loadinfo_s
   uint16_t      buflen;      /* size of iobuffer[] */
   int           filfd;       /* Descriptor for the file being loaded */
   int           nexports;    /* ET_DYN - Number of symbols exported */
-  int           gotindex;    /* Index to the GOT section */
   uintptr_t     xipbase;     /* if elf is position independent, and use
                               * romfs/tmps, we can try get xipbase,
                               * skip the copy.
                               */
+
+  /* True if e_ident[EI_OSABI] marked this an FDPIC object. */
+
+  bool          fdpic;
+
+#ifdef HAVE_LIBC_ELF_PIN
+  /* The file the pin is held through, handed to the module once it loads. */
+
+  FAR struct file *pinfile;
+#endif
+
+  /* The object's GOT.  gotbase is where it ended up: the placed address of
+   * .got, or DT_PLTGOT for an FDPIC object, which runs with it in the PIC
+   * base register.  gotsize is the extent of .got, and is also what says
+   * the object has one at all.
+   */
+
+  uintptr_t     gotbase;
+  size_t        gotsize;
+
+  /* Pool of function descriptors behind the writable segment.  Reserved
+   * when the segment is sized, and bounded by the relocation count.
+   */
+
+  FAR struct fdpic_desc_s *descpool;
+  uint16_t      ndesc;       /* Capacity */
+  uint16_t      usedesc;     /* Next free slot */
 
   /* Address environment.
    *
@@ -779,5 +832,25 @@ FAR void *libelf_gethandle(FAR const char *name);
 #else
 #  define libelf_gethandle(n) NULL
 #endif
+
+/****************************************************************************
+ * Name: libelf_findsymbol
+ *
+ * Description:
+ *   Locate a symbol in the ELF symbol table by its name.
+ *
+ * Input Parameters:
+ *   loadinfo - Load state information containing the symbol table
+ *   name     - The name of the symbol to search for
+ *   sym      - Pointer to store the located symbol's table entry
+ *
+ * Returned Value:
+ *   0 (OK) is returned on success and a negated errno is returned on
+ *   failure.
+ *
+ ****************************************************************************/
+
+int libelf_findsymbol(FAR struct mod_loadinfo_s *loadinfo,
+                      FAR const char *name, FAR Elf_Sym *sym);
 
 #endif /* __INCLUDE_NUTTX_LIB_LIBC_ELF_H */

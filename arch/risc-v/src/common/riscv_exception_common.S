@@ -26,6 +26,7 @@
 
 #include <nuttx/config.h>
 
+#include <nuttx/irq.h>
 #include <arch/arch.h>
 #include <arch/irq.h>
 #include <arch/mode.h>
@@ -86,6 +87,10 @@
 #  define EXCEPTION_SECTION .text
 #endif
 
+/* Valid exceptions causes range is from 0 to 63 */
+
+#define CAUSE_EXCEPTION   63
+
 /****************************************************************************
  * Public Symbols
  ****************************************************************************/
@@ -103,6 +108,8 @@
   .global exception_common
   .global return_from_exception
   .global return_from_syscall
+  .type   exception_common, function
+  .type   return_from_exception, function
   .align  8
 
 exception_common:
@@ -140,6 +147,9 @@ exception_common:
   csrr       s0, CSR_STATUS       /* s0=status */
   csrr       s1, CSR_EPC          /* s1=exception PC */
   csrr       s2, CSR_CAUSE        /* s2=cause */
+#ifdef CONFIG_ARCH_RV_HAVE_CLIC
+  csrr       s4, CSR_INTTHRESH    /* s4=interrupt threshold */
+#endif
 
 #ifdef CONFIG_ARCH_KERNEL_STACK
   csrr       s3, CSR_SCRATCH
@@ -151,6 +161,9 @@ exception_common:
   REGSTORE   s0, REG_INT_CTX(sp)
   REGSTORE   s1, REG_EPC(sp)
   REGSTORE   s3, REG_SP(sp)
+#ifdef CONFIG_ARCH_RV_HAVE_CLIC
+  REGSTORE   s4, REG_INT_THRESH(sp)
+#endif
 
 #ifdef CONFIG_LIB_SYSCALL
   csrr       tp, CSR_SCRATCH      /* Load kernel TP */
@@ -159,6 +172,11 @@ exception_common:
   /* Check whether it is an exception or interrupt */
 
   blt        s2, x0, handle_irq   /* If cause < 0 it is interrupt */
+
+  /* Adjust exception cause range from 0 to 63 */
+
+  li         s3, CAUSE_EXCEPTION
+  and        s2, s2, s3
 
   /* Is it a system call ? */
 
@@ -239,7 +257,9 @@ handle_irq:
   REGSTORE   s0, 0(sp)
   add        s0, sp, (INT_REG_SIZE * 2)
 
+#ifdef CONFIG_ENABLE_ALL_SIGNALS
   addi       sp, sp, -XCPTCONTEXT_SIZE
+#endif
 
   /* Call interrupt handler in C */
 
@@ -249,9 +269,11 @@ handle_irq:
   REGLOAD    s0, 0(sp)
   add        sp, sp, (INT_REG_SIZE * 2)
 
+#ifdef CONFIG_ENABLE_ALL_SIGNALS
   /* Restore sp */
 
   addi       sp, sp, XCPTCONTEXT_SIZE
+#endif
 #endif
 
 return_from_exception:
@@ -265,6 +287,10 @@ return_from_exception:
 
   REGLOAD    s0, REG_INT_CTX(sp)  /* restore status */
   csrw       CSR_STATUS, s0
+#ifdef CONFIG_ARCH_RV_HAVE_CLIC
+  REGLOAD    s0, REG_INT_THRESH(sp) /* restore interrupt threshold */
+  csrw       CSR_INTTHRESH, s0
+#endif
 
 #ifdef CONFIG_LIB_SYSCALL
   /* Store tcb to scratch register */
@@ -323,6 +349,7 @@ return_from_exception:
 
   .section EXCEPTION_SECTION
   .global riscv_jump_to_user
+  .type   riscv_jump_to_user, function
 
 riscv_jump_to_user:
 
@@ -356,8 +383,8 @@ riscv_jump_to_user:
   .type   g_intstackalloc, object
   .type   g_intstacktop, object
 g_intstackalloc:
-  .skip  STACK_ALIGN_UP(STACK_ALLOC_SIZE)
+  .skip  STACKFRAME_ALIGN_UP(STACK_ALLOC_SIZE)
 g_intstacktop:
   .size  g_intstacktop, 0
-  .size  g_intstackalloc, STACK_ALIGN_DOWN(STACK_ALLOC_SIZE)
+  .size  g_intstackalloc, STACKFRAME_ALIGN_DOWN(STACK_ALLOC_SIZE)
 #endif

@@ -32,7 +32,7 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <arpa/inet.h>
 
@@ -466,7 +466,7 @@ static void skel_interrupt_work(FAR void *arg)
    * thread has been configured.
    */
 
-  net_lock();
+  netdev_lock(&priv->sk_dev);
 
   /* Process pending Ethernet interrupts */
 
@@ -484,7 +484,7 @@ static void skel_interrupt_work(FAR void *arg)
    */
 
   skel_txdone(priv);
-  net_unlock();
+  netdev_unlock(&priv->sk_dev);
 
   /* Re-enable Ethernet interrupts */
 
@@ -564,7 +564,7 @@ static void skel_txtimeout_work(FAR void *arg)
    * thread has been configured.
    */
 
-  net_lock();
+  netdev_lock(&priv->sk_dev);
 
   /* Increment statistics and dump debug info */
 
@@ -575,7 +575,7 @@ static void skel_txtimeout_work(FAR void *arg)
   /* Then poll the network for new XMIT data */
 
   devif_poll(&priv->sk_dev, skel_txpoll);
-  net_unlock();
+  netdev_unlock(&priv->sk_dev);
 }
 
 /****************************************************************************
@@ -657,6 +657,9 @@ static int skel_ifup(FAR struct net_driver_s *dev)
   priv->sk_bifup = true;
   up_enable_irq(CONFIG_NET_SKELETON_IRQ);
   spin_unlock_irqrestore(&priv->sk_lock, flags);
+
+  netdev_carrier_on(dev);
+
   return OK;
 }
 
@@ -701,6 +704,9 @@ static int skel_ifdown(FAR struct net_driver_s *dev)
 
   priv->sk_bifup = false;
   spin_unlock_irqrestore(&priv->sk_lock, flags);
+
+  netdev_carrier_off(dev);
+
   return OK;
 }
 
@@ -731,7 +737,7 @@ static void skel_txavail_work(FAR void *arg)
    * thread has been configured.
    */
 
-  net_lock();
+  netdev_lock(&priv->sk_dev);
 
   /* Ignore the notification if the interface is not yet up */
 
@@ -744,7 +750,7 @@ static void skel_txavail_work(FAR void *arg)
       devif_poll(&priv->sk_dev, skel_txpoll);
     }
 
-  net_unlock();
+  netdev_unlock(&priv->sk_dev);
 }
 
 /****************************************************************************

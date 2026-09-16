@@ -29,7 +29,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
@@ -124,7 +124,7 @@ static inline uint64_t bl602_get_nsec(void)
 
   up_timer_gettime(&ts);
 
-  return (uint64_t)ts.tv_nsec + (uint64_t)ts.tv_sec * NSEC_PER_SEC;
+  return ts.tv_nsec + ts.tv_sec * NSEC_PER_SEC;
 }
 
 /****************************************************************************

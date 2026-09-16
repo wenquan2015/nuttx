@@ -33,21 +33,13 @@
 #include <nuttx/signal.h>
 #include <arch/io.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <inttypes.h>
 #include <syscall.h>
 #include <arch/board/board.h>
 
 #include "x86_64_internal.h"
 #include "sched/sched.h"
-
-/****************************************************************************
- * Pre-processor Definitions
- ****************************************************************************/
-
-#define X2APIC_EOI    0x80b
-
-#define APIC_EOI_ACK  0
 
 /****************************************************************************
  * Private Functions
@@ -102,6 +94,7 @@ static uint64_t *common_handler(int irq, uint64_t *regs)
        */
 
       addrenv_switch(tcb);
+      tcb = this_task();
 #endif
 
       /* Update scheduler parameters */
@@ -114,10 +107,6 @@ static uint64_t *common_handler(int irq, uint64_t *regs)
        */
 
       *running_task = tcb;
-
-      /* Restore the cpu lock */
-
-      restore_critical_section(tcb, this_cpu());
     }
 
   /* Clear irq flag */
@@ -167,7 +156,7 @@ uint64_t *irq_handler(uint64_t *regs, uint64_t irq_no)
 
   /* Send an EOI (end of interrupt) signal to the APIC */
 
-  write_msr(X2APIC_EOI, APIC_EOI_ACK);
+  apic_write(APIC_EOI, APIC_EOI_ACK);
   board_autoled_off(LED_INIRQ);
   return ret;
 #endif
@@ -187,7 +176,7 @@ uint64_t *irq_handler(uint64_t *regs, uint64_t irq_no)
  *
  ****************************************************************************/
 
-nosanitize_address
+noinstrument_function nosanitize_address
 uint64_t *irq_xcp_regs(void)
 {
   /* This must be the simplest as possible, so we not use too much registers.

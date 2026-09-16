@@ -37,7 +37,7 @@
 #include <limits.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/kmalloc.h>
 #include <nuttx/fs/fs.h>
@@ -202,7 +202,7 @@ static int romfs_open(FAR struct file *filep, FAR const char *relpath,
    * access is not permitted.
    */
 
-  if ((oflags & O_WRONLY) != 0 || (oflags & O_RDONLY) == 0)
+  if ((oflags & O_ACCMODE) != O_RDONLY)
     {
       ferr("ERROR: Only O_RDONLY supported\n");
       ret = -EACCES;
@@ -563,6 +563,13 @@ static off_t romfs_seek(FAR struct file *filep, off_t offset, int whence)
        goto errout_with_lock;
     }
 
+  if (position < 0)
+    {
+      ferr("ERROR: Invalid position: %jd\n", (intmax_t)position);
+      ret = -EINVAL;
+      goto errout_with_lock;
+    }
+
   /* Limit positions to the end of the file. */
 
   if (position > rf->rf_size)
@@ -579,7 +586,7 @@ static off_t romfs_seek(FAR struct file *filep, off_t offset, int whence)
 
 errout_with_lock:
   nxrmutex_unlock(&rm->rm_lock);
-  return ret;
+  return ret < 0 ? ret : position;
 }
 
 /****************************************************************************

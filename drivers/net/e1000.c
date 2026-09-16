@@ -27,7 +27,7 @@
 #include <nuttx/config.h>
 
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 
 #include <nuttx/arch.h>
@@ -262,7 +262,27 @@ static const struct e1000_type_s g_e1000_82574l =
 static const struct pci_device_id_s g_e1000_id_table[] =
 {
   {
+    PCI_DEVICE(0x8086, 0x1a1c),
+    .driver_data = (uintptr_t)&g_e1000_i219
+  },
+  {
     PCI_DEVICE(0x8086, 0x1a1e),
+    .driver_data = (uintptr_t)&g_e1000_i219
+  },
+  {
+    PCI_DEVICE(0x8086, 0x0d4c),
+    .driver_data = (uintptr_t)&g_e1000_i219
+  },
+  {
+    PCI_DEVICE(0x8086, 0x0d4d),
+    .driver_data = (uintptr_t)&g_e1000_i219
+  },
+  {
+    PCI_DEVICE(0x8086, 0x15b8),
+    .driver_data = (uintptr_t)&g_e1000_i219
+  },
+  {
+    PCI_DEVICE(0x8086, 0x15bb),
     .driver_data = (uintptr_t)&g_e1000_i219
   },
   {
@@ -298,6 +318,12 @@ static const struct netdev_ops_s g_e1000_ops =
  * Private Functions
  *****************************************************************************/
 
+/* The device requires 32-bit register accesses, but volatile does not pin
+ * the access width: GCC 16 narrows a 32-bit load feeding a single bit test
+ * into a byte load.  Launder the value through a register with an empty
+ * asm, on loads and stores both, to force the full-width access.
+ */
+
 /*****************************************************************************
  * Name: e1000_getreg_mem
  *****************************************************************************/
@@ -305,8 +331,11 @@ static const struct netdev_ops_s g_e1000_ops =
 static uint32_t e1000_getreg_mem(FAR struct e1000_driver_s *priv,
                                  unsigned int offset)
 {
-  uintptr_t addr = priv->base + offset;
-  return *((FAR volatile uint32_t *)addr);
+  uintptr_t addr   = priv->base + offset;
+  uint32_t  regval = *((FAR volatile uint32_t *)addr);
+
+  __asm__ __volatile__("" : "+r"(regval));
+  return regval;
 }
 
 /*****************************************************************************
@@ -318,6 +347,8 @@ static void e1000_putreg_mem(FAR struct e1000_driver_s *priv,
                              uint32_t value)
 {
   uintptr_t addr = priv->base + offset;
+
+  __asm__ __volatile__("" : "+r"(value));
   *((FAR volatile uint32_t *)addr) = value;
 }
 

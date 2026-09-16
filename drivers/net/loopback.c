@@ -32,7 +32,7 @@
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -194,7 +194,7 @@ static void lo_txavail_work(FAR void *arg)
 
   /* Ignore the notification if the interface is not yet up */
 
-  net_lock();
+  netdev_lock(&priv->lo_dev);
   if (priv->lo_bifup)
     {
       /* Reuse the devif_loopback() logic, Polling all pending events until
@@ -204,7 +204,7 @@ static void lo_txavail_work(FAR void *arg)
       while (devif_poll(&priv->lo_dev, NULL));
     }
 
-  net_unlock();
+  netdev_unlock(&priv->lo_dev);
 }
 
 /****************************************************************************

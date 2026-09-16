@@ -47,7 +47,7 @@
 #include <nuttx/config.h>
 #if defined(CONFIG_NET) && defined(CONFIG_NET_UDP)
 
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/net/netconfig.h>
 #include <nuttx/net/netdev.h>
@@ -138,7 +138,7 @@ static bool udp_is_broadcast(FAR struct net_driver_s *dev)
 static int udp_input_conn(FAR struct net_driver_s *dev,
                           FAR struct udp_conn_s *conn, unsigned int udpiplen)
 {
-  uint16_t flags;
+  uint32_t flags;
 
   /* Set-up for the application callback */
 
@@ -217,7 +217,7 @@ static int udp_input(FAR struct net_driver_s *dev, unsigned int iplen)
   unsigned int udpiplen;
   unsigned int udpdatalen = dev->d_len - iplen;
 #ifdef CONFIG_NET_UDP_CHECKSUMS
-  uint16_t chksum;
+  uint16_t chksum = 0;
 #endif
   int ret = OK;
 
@@ -253,10 +253,13 @@ static int udp_input(FAR struct net_driver_s *dev, unsigned int iplen)
    */
 
   dev->d_len    -= udpiplen;
-  dev->d_appdata = IPBUF(udpiplen);
 
 #ifdef CONFIG_NET_UDP_CHECKSUMS
-  chksum = udp->udpchksum;
+  if ((dev->d_features & NETDEV_RX_CSUM) == 0)
+    {
+      chksum = udp->udpchksum;
+    }
+
   if (chksum != 0)
     {
 #ifdef CONFIG_NET_IPv6
@@ -332,6 +335,7 @@ static int udp_input(FAR struct net_driver_s *dev, unsigned int iplen)
                     }
 
                   netdev_iob_replace(dev, iob);
+                  dev->d_len -= udpiplen;
                   udp  = IPBUF(iplen);
                   conn = nextconn;
                 }

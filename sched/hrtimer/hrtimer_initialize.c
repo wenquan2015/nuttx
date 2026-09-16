@@ -32,25 +32,55 @@
  * Public Data
  ****************************************************************************/
 
+/* Array of pointers to currently running high-resolution timers
+ * for each CPU in SMP configurations. Index corresponds to CPU ID.
+ */
+
+#ifdef CONFIG_SMP
+uintptr_t g_hrtimer_running[CONFIG_SMP_NCPUS];
+#endif
+
 /* Global spinlock protecting the high-resolution timer subsystem.
  *
- * This spinlock serializes access to the hrtimer red-black tree and
+ * This spinlock serializes access to the hrtimer queue and
  * protects timer state transitions. It must be held whenever the
- * timer tree or hrtimer state is modified.
+ * timer queue is modified.
  */
 
-spinlock_t g_hrtimer_spinlock = SP_UNLOCKED;
+seqcount_t g_hrtimer_lock = SEQLOCK_INITIALIZER;
 
-/* Red-black tree containing all active high-resolution timers.
+/* HRTimer queue for all active high-resolution timers.
  *
- * Only timers in the ARMED state are present in this tree. Timers in
- * the RUNNING, CANCELED, or INACTIVE states must not be inserted.
+ * When CONFIG_HRTIMER_TREE is enabled, timers are stored in a queue.
+ * When disabled, timers are stored in a linked list.
  *
- * The tree is ordered by absolute expiration time.
+ * The queue is ordered by absolute expiration time in
+ * both configurations.
  */
 
+struct hrtimer_s g_hrtimer_guard =
+{
+#ifdef CONFIG_HRTIMER_TREE
+  { NULL },
+#else
+  { &g_hrtimer_list, &g_hrtimer_list },
+#endif
+  NULL,
+  INT64_MAX
+};
+
+#ifdef CONFIG_HRTIMER_TREE
 struct hrtimer_tree_s g_hrtimer_tree =
-  RB_INITIALIZER(g_hrtimer_tree);
+{
+  &g_hrtimer_guard
+};
+struct FAR hrtimer_s *g_hrtimer_head = &g_hrtimer_guard;
+#else
+struct list_node g_hrtimer_list =
+{
+  &g_hrtimer_guard.node, &g_hrtimer_guard.node
+};
+#endif
 
 /****************************************************************************
  * Public Functions
@@ -60,20 +90,24 @@ struct hrtimer_tree_s g_hrtimer_tree =
  * Name: RB_GENERATE
  *
  * Description:
- *   Instantiate the red-black tree helper functions for the hrtimer
+ *   Instantiate the queue helper functions for the hrtimer
  *   subsystem.
  *
  *   This macro generates the static inline functions required to
- *   manipulate the hrtimer red-black tree, including insertion,
+ *   manipulate the hrtimer queue, including insertion,
  *   removal, and lookup operations.
+ *
+ *   Note: This is only compiled when CONFIG_HRTIMER_TREE is enabled.
  *
  * Assumptions/Notes:
  *   - The tree key is the absolute expiration time stored in
  *     hrtimer_node_s and compared via hrtimer_compare().
  *   - All accesses to the tree must be serialized using
- *     g_hrtimer_spinlock.
+ *     g_hrtimer_lock.
  *   - These generated functions are used internally by the hrtimer
  *     core (e.g., hrtimer_start(), hrtimer_cancel(), and expire paths).
  ****************************************************************************/
 
-RB_GENERATE(hrtimer_tree_s, hrtimer_node_s, entry, hrtimer_compare);
+#ifdef CONFIG_HRTIMER_TREE
+RB_GENERATE(hrtimer_tree_s, hrtimer_s, node, hrtimer_compare);
+#endif

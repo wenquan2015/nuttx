@@ -1055,7 +1055,7 @@ static int tzload(FAR const char *name,
         }
     }
 
-  /* If type 0 is is unused in transitions, it's the type to use for early
+  /* If type 0 is unused in transitions, it's the type to use for early
    * times.
    */
 
@@ -2751,8 +2751,8 @@ static int zoneinit(FAR const char *name)
       int err;
 
       err = tzload(name, g_lcl_ptr, TRUE);
-      if (err != 0 && name != NULL && name[0] == ':' &&
-          tzparse(name, g_lcl_ptr, NULL) != 0)
+      if (err != 0 && name != NULL && name[0] != ':' &&
+          tzparse(name, g_lcl_ptr, NULL) == 0)
         {
           err = 0;
         }

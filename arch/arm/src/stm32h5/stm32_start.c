@@ -28,7 +28,7 @@
 
 #include <stdint.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/init.h>
 #include <arch/board/board.h>
@@ -39,6 +39,10 @@
 #include "stm32.h"
 #include "stm32_gpio.h"
 #include "stm32_start.h"
+
+#ifdef CONFIG_ARM_MPU
+#  include "stm32_mpuinit.h"
+#endif
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -83,10 +87,10 @@
  */
 
 #define SRAM2_START  STM32_SRAM2_BASE
-#define SRAM2_END    (SRAM2_START + STM32H5_SRAM2_SIZE)
+#define SRAM2_END    (SRAM2_START + STM32_SRAM2_SIZE)
 
 #define SRAM3_START  STM32_SRAM3_BASE
-#define SRAM3_END    (SRAM3_START + STM32H5_SRAM3_SIZE)
+#define SRAM3_END    (SRAM3_START + STM32_SRAM3_SIZE)
 
 #define HEAP_BASE  ((uintptr_t)_ebss + CONFIG_IDLETHREAD_STACKSIZE)
 
@@ -176,7 +180,7 @@ void __start(void)
       *dest++ = *src++;
     }
 
-#ifdef CONFIG_STM32H5_SRAM2_INIT
+#ifdef CONFIG_STM32_SRAM2_INIT
   /* NOTE:  this is optional because this may be inappropriate, especially
    * if the memory is being used for it's battery backed purpose.  In that
    * case, the first-time initialization needs to be performed by the board
@@ -190,7 +194,7 @@ void __start(void)
     }
 #endif
 
-#ifdef CONFIG_STM32H5_SRAM3_INIT
+#ifdef CONFIG_STM32_SRAM3_INIT
   for (dest = (uint32_t *)SRAM3_START; dest < (uint32_t *)SRAM3_END; )
     {
       *dest++ = 0;
@@ -220,12 +224,21 @@ void __start(void)
 #endif
   showprogress('B');
 
+  /* Configure the MPU to permit user-space access to its FLASH and RAM (for
+   * CONFIG_BUILD_PROTECTED) or to manage cache properties of external
+   * memory regions (in a flat build).
+   */
+
+#ifdef CONFIG_ARM_MPU
+  stm32_mpuinitialize();
+#endif
+
   /* Initialize onboard resources */
 
   stm32_board_initialize();
   showprogress('C');
 
-#ifdef CONFIG_STM32H5_ICACHE
+#ifdef CONFIG_STM32_ICACHE
   stm32_enable_icache();
 #endif
   showprogress('G');

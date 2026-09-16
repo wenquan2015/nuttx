@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sched.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 
 #include <nuttx/addrenv.h>
@@ -45,6 +45,7 @@
 #include <nuttx/binfmt/binfmt.h>
 
 #include "binfmt.h"
+#include "environ/environ.h"
 
 #ifndef CONFIG_BINFMT_DISABLE
 
@@ -240,17 +241,6 @@ int exec_module(FAR struct binary_s *binp,
   umm_initialize(vheap, up_addrenv_heapsize(addrenv));
 #endif
 
-#if defined(CONFIG_ARCH_ADDRENV) && defined(CONFIG_ARCH_KERNEL_STACK)
-  /* Allocate the kernel stack */
-
-  ret = up_addrenv_kstackalloc(tcb);
-  if (ret < 0)
-    {
-      berr("ERROR: up_addrenv_kstackalloc() failed: %d\n", ret);
-      goto errout_with_addrenv;
-    }
-#endif
-
   /* Note that tcb->flags are not modified.  0=normal task */
 
   /* tcb->flags |= TCB_FLAG_TTYPE_TASK; */
@@ -312,14 +302,29 @@ int exec_module(FAR struct binary_s *binp,
 #endif
 
 #ifdef CONFIG_SCHED_USER_IDENTITY
-  if (binp->mode & S_ISUID)
-    {
-      tcb->group->tg_euid = binp->uid;
-    }
+  /* Apply set-user-ID / set-group-ID credentials for the new image. */
 
-  if (binp->mode & S_ISGID)
+  if ((binp->mode & (S_ISUID | S_ISGID)) != 0)
     {
-      tcb->group->tg_egid = binp->gid;
+      FAR struct task_group_s *group = tcb->group;
+
+      if ((binp->mode & S_ISUID) != 0)
+        {
+          group->tg_euid = binp->uid;
+          group->tg_suid = binp->uid;
+        }
+
+      if ((binp->mode & S_ISGID) != 0)
+        {
+          group->tg_egid = binp->gid;
+          group->tg_sgid = binp->gid;
+        }
+
+      group->tg_flags |= GROUP_FLAG_SECURE_EXEC;
+      group->tg_flags &= ~(GROUP_FLAG_FD_BACKTRACE | GROUP_FLAG_DUMPABLE);
+#ifndef CONFIG_DISABLE_ENVIRON
+      env_sanitize_secure(group);
+#endif
     }
 #endif
 
@@ -353,6 +358,10 @@ int exec_module(FAR struct binary_s *binp,
           goto errout_with_tcbinit;
         }
     }
+
+#ifdef CONFIG_BINFMT_LOADABLE
+  tcb->group->tg_bininfo = binp;
+#endif
 
   /* Then activate the task at the provided priority */
 

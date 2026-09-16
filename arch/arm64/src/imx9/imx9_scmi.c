@@ -28,7 +28,7 @@
 #include <nuttx/config.h>
 
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdbool.h>
@@ -476,7 +476,7 @@ static int imx9_scmi_tx(uint32_t channel, uint32_t protocol_id,
       *header = SCMI_HEADER_MSG(message_id)
                 | SCMI_HEADER_PROTOCOL(protocol_id)
                 | SCMI_HEADER_TYPE(0UL)
-                | SCMI_HEADER_TOKEN(atomic_fetch_add(&g_token, 1));
+                | SCMI_HEADER_TOKEN(atomic_add(&g_token, 1));
       msg->header = *header;
 
       /* Send message via transport */

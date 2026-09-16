@@ -34,8 +34,8 @@
 #include <unistd.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
 
+#include <nuttx/debug.h>
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/signal.h>
@@ -43,6 +43,7 @@
 #include <nuttx/wqueue.h>
 #include <nuttx/scsi.h>
 #include <nuttx/fs/fs.h>
+#include <nuttx/fs/partition.h>
 #include <nuttx/mutex.h>
 
 #include <nuttx/usb/usb.h>
@@ -479,9 +480,9 @@ static void usbhost_dumpcbw(FAR struct usbmsc_cbw_s *cbw)
   int i;
 
   uinfo("CBW:\n");
-  uinfo("  signature: %08x\n", usbhost_getle32(cbw->signature));
-  uinfo("  tag:       %08x\n", usbhost_getle32(cbw->tag));
-  uinfo("  datlen:    %08x\n", usbhost_getle32(cbw->datlen));
+  uinfo("  signature: %08" PRIx32 "\n", usbhost_getle32(cbw->signature));
+  uinfo("  tag:       %08" PRIx32 "\n", usbhost_getle32(cbw->tag));
+  uinfo("  datlen:    %08" PRIx32 "\n", usbhost_getle32(cbw->datlen));
   uinfo("  flags:     %02x\n", cbw->flags);
   uinfo("  lun:       %02x\n", cbw->lun);
   uinfo("  cdblen:    %02x\n", cbw->cdblen);
@@ -499,9 +500,9 @@ static void usbhost_dumpcbw(FAR struct usbmsc_cbw_s *cbw)
 static void usbhost_dumpcsw(FAR struct usbmsc_csw_s *csw)
 {
   uinfo("CSW:\n");
-  uinfo("  signature: %08x\n", usbhost_getle32(csw->signature));
-  uinfo("  tag:       %08x\n", usbhost_getle32(csw->tag));
-  uinfo("  residue:   %08x\n", usbhost_getle32(csw->residue));
+  uinfo("  signature: %08" PRIx32 "\n", usbhost_getle32(csw->signature));
+  uinfo("  tag:       %08" PRIx32 "\n", usbhost_getle32(csw->tag));
+  uinfo("  residue:   %08" PRIx32 "\n", usbhost_getle32(csw->residue));
   uinfo("  status:    %02x\n", csw->status);
 }
 #endif
@@ -870,6 +871,41 @@ static inline int usbhost_inquiry(FAR struct usbhost_state_s *priv)
   return nbytes < 0 ? (int)nbytes : OK;
 }
 
+#ifdef CONFIG_USBHOST_MSC_PARTITIONS
+/****************************************************************************
+ * Name: usbhost_part_handler
+ *
+ * Description:
+ *   Give one partition found on a drive a block device of its own, named
+ *   after the drive it came from with the partition number after it, which
+ *   is the convention every other system uses.
+ *
+ ****************************************************************************/
+
+static void usbhost_part_handler(FAR struct partition_s *part, FAR void *arg)
+{
+  FAR const char *devname = arg;
+  char            partname[DEV_NAMELEN + 4];
+
+  if (part->nblocks == 0)
+    {
+      return;
+    }
+
+  snprintf(partname, sizeof(partname), "%s%zu", devname, part->index + 1);
+
+  if (register_blockpartition(partname, 0, devname, part->firstblock,
+                              part->nblocks) < 0)
+    {
+      uerr("ERROR: cannot register %s\n", partname);
+      return;
+    }
+
+  uinfo("%s: %zu blocks from %zu\n", partname, part->nblocks,
+        part->firstblock);
+}
+#endif
+
 /****************************************************************************
  * Name: usbhost_destroy
  *
@@ -1235,7 +1271,7 @@ static inline int usbhost_initvolume(FAR struct usbhost_state_s *priv)
 
       /* Send TESTUNITREADY to see if the unit is ready.  The most likely
        * error error that can occur here is a a stall which simply means
-       * that the the device is not yet able to respond.
+       * that the device is not yet able to respond.
        */
 
       ret = usbhost_testunitready(priv);
@@ -1331,6 +1367,18 @@ static inline int usbhost_initvolume(FAR struct usbhost_state_s *priv)
       uinfo("Register block driver\n");
       usbhost_mkdevname(priv, devname);
       ret = register_blockdriver(devname, &g_bops, 0, priv);
+
+#ifdef CONFIG_USBHOST_MSC_PARTITIONS
+      /* Such a drive is usually partitioned rather than holding a
+       * filesystem outright.  Give each partition a block device beside
+       * the whole drive, which stays available.
+       */
+
+      if (ret >= 0)
+        {
+          parse_block_partition(devname, usbhost_part_handler, devname);
+        }
+#endif
     }
 
   /* Decrement the reference count.  We incremented the reference count
@@ -2235,7 +2283,7 @@ static int usbhost_geometry(FAR struct inode *inode,
           geometry->geo_sectorsize    = priv->blocksize;
           nxmutex_unlock(&priv->lock);
 
-          uinfo("nsectors: %" PRIdOFF " sectorsize: %" PRIi16 "\n",
+          uinfo("nsectors: %" PRIdOFF " sectorsize: %" PRId32 "\n",
                 geometry->geo_nsectors, geometry->geo_sectorsize);
         }
     }

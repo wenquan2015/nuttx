@@ -31,7 +31,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <string.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <poll.h>
 #include <fcntl.h>
 
@@ -585,7 +585,7 @@ int battery_monitor_register(FAR const char *devpath,
 
   /* Register the character driver */
 
-  ret = register_driver(devpath, &g_batteryops, 0555, dev);
+  ret = register_driver(devpath, &g_batteryops, 0500, dev);
   if (ret < 0)
     {
       baterr("ERROR: Failed to register driver: %d\n", ret);

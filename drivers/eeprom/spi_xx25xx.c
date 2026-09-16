@@ -32,7 +32,7 @@
 
 #include <sys/types.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 #include <stdio.h>
 
@@ -929,20 +929,35 @@ static off_t ee25xx_seek(FAR struct file *filep, off_t offset, int whence)
       return ret;
     }
 
-  /* Determine the new, requested file position */
+  /* Determine the new, requested file position
+   * For EEPROM sparse files are not allowed.
+   * "offset" can be negative, "newpos" must be between 0 and eedev->size
+   */
 
   switch (whence)
     {
     case SEEK_CUR:
       newpos = filep->f_pos + offset;
+      if (newpos < 0 || newpos > eedev->size)
+        {
+          return -EINVAL;
+        }
       break;
 
     case SEEK_SET:
       newpos = offset;
+      if (newpos < 0 || newpos > eedev->size)
+        {
+          return -EINVAL;
+        }
       break;
 
     case SEEK_END:
       newpos = eedev->size + offset;
+      if (newpos < 0 || newpos > eedev->size)
+        {
+          return -EINVAL;
+        }
       break;
 
     default:
@@ -1505,7 +1520,7 @@ int ee25xx_initialize(FAR struct spi_dev_s *dev, uint16_t spi_devid,
       "readonly %d\n", devname, eedev->size, eedev->pgsize,
       eedev->addrlen, eedev->readonly);
 
-  return register_driver(devname, &g_ee25xx_fops, 0666, eedev);
+  return register_driver(devname, &g_ee25xx_fops, 0600, eedev);
 }
 
 /****************************************************************************

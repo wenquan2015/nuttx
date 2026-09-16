@@ -389,7 +389,7 @@ Here are a few tips before you start that effort:
    on the command line.
 
 Startup files will probably cause you some headaches.  The NuttX startup file
-is arch/arm/src/stm32/stm32_vectors.S.  With RIDE, I have to build NuttX
+is arch/arm/src/stm32f4/gnu/stm32_vectors.S.  With RIDE, I have to build NuttX
 one time from the Cygwin command line in order to obtain the pre-built
 startup object needed by RIDE.
 
@@ -401,7 +401,7 @@ be modified to point to the correct path to the Cortex-M3 GCC toolchain (if
 different from the default in your PATH variable).
 
 If you have no Cortex-M3 toolchain, one can be downloaded from the NuttX
-Bitbucket download site (https://bitbucket.org/nuttx/buildroot/downloads/).
+buildroot repository (https://github.com/patacongo/buildroot).
 This GNU toolchain builds and executes in the Linux or Cygwin environment.
 
 NXFLAT Toolchain

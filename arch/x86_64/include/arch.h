@@ -35,11 +35,15 @@
 
 #include <sys/types.h>
 
+#include <arch/barriers.h>
+
 /* Include chip-specific definitions */
 
-#  include <arch/chip/arch.h>
+#include <arch/chip/arch.h>
 
 /* Include architecture-specific definitions */
+
+#include <arch/barriers.h>
 
 #ifdef CONFIG_ARCH_INTEL64
 #  include <arch/intel64/arch.h>

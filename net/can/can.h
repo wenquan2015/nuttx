@@ -124,7 +124,7 @@ struct can_conn_s
    * socket events.
    */
 
-  struct can_poll_s pollinfo[4]; /* FIXME make dynamic */
+  struct can_poll_s pollinfo[CONFIG_NET_CAN_NPOLLWAITERS];
 
 #ifdef CONFIG_NET_CANPROTO_OPTIONS
   struct can_filter filters[CONFIG_NET_CAN_RAW_FILTER_MAX];
@@ -237,8 +237,8 @@ FAR struct can_conn_s *can_active(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-uint16_t can_callback(FAR struct net_driver_s *dev,
-                      FAR struct can_conn_s *conn, uint16_t flags);
+uint32_t can_callback(FAR struct net_driver_s *dev,
+                      FAR struct can_conn_s *conn, uint32_t flags);
 
 /****************************************************************************
  * Name: can_datahandler
@@ -254,8 +254,8 @@ uint16_t can_callback(FAR struct net_driver_s *dev,
  *   conn - A pointer to the CAN connection structure
  *
  * Returned Value:
- *   The number of bytes actually buffered is returned.  This will be either
- *   zero or equal to buflen; partial packets are not buffered.
+ *   The number of bytes actually buffered is returned.  This will be
+ *   negative or zero or equal to buflen; partial packets are not buffered.
  *
  * Assumptions:
  * - The caller has checked that CAN_NEWDATA is set in flags and that is no
@@ -264,8 +264,8 @@ uint16_t can_callback(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-uint16_t can_datahandler(FAR struct net_driver_s *dev,
-                         FAR struct can_conn_s *conn);
+int can_datahandler(FAR struct net_driver_s *dev,
+                    FAR struct can_conn_s *conn);
 
 /****************************************************************************
  * Name: can_recvmsg
@@ -354,7 +354,7 @@ int psock_can_cansend(FAR struct socket *psock);
  *
  ****************************************************************************/
 
-ssize_t can_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
+ssize_t can_sendmsg(FAR struct socket *psock, FAR const struct msghdr *msg,
                     int flags);
 
 /****************************************************************************

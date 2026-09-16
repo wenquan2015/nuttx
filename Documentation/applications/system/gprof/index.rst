@@ -1,114 +1,127 @@
-=============================
-``gprof`` GNU Profile tool
-=============================
+===========================
+``gprof`` profiling command
+===========================
 
-GNU Profile (gprof) is a performance analysis tool that helps developers
-identify code bottlenecks and optimize their programs.
-It provides detailed information about the execution time and call
-frequency of functions within a program.
+The ``gprof`` command controls the NuttX function-call profiling subsystem.
+It can start and stop sampling at runtime and dump the collected profiling
+data to a file in ``gmon.out`` format.  The resulting file can be processed
+with the host ``gprof`` tool (or compatible analysers) to produce a flat
+profile and a call-graph.
 
-gprof can be used to:
+Profiling relies on compiler instrumentation (``-finstrument-functions``
+or equivalent).  Each instrumented function call records the caller and
+callee addresses; the dump subcommand writes these records together with a
+histogram of sampled program-counter values.
 
-1. Detect performance bottlenecks in your code
-2. Identify which functions consume the most execution time
-3. Analyze the call graph of your program
-4. Help prioritize optimization efforts
+Configuration
+=============
+
+Enable the application with ``CONFIG_SYSTEM_GPROF`` (tristate; can be
+built-in or an NSH command).
+
+``CONFIG_SYSTEM_GPROF`` depends on profiling being enabled.  Set
+``CONFIG_PROFILE_NONE`` to ``n`` (or enable ``CONFIG_SIM_GPROF`` for the
+simulator).
+
+Related profiling options:
+
+- ``CONFIG_PROFILE`` -- enable the NuttX profiling framework
+- ``CONFIG_PROFILE_DUMP_ON_EXIT`` -- automatically dump profiling data when
+  the process exits
+
+Task tuning:
+
+- ``CONFIG_SYSTEM_GPROF_PRIORITY`` -- task priority (default ``100``)
+- ``CONFIG_SYSTEM_GPROF_STACKSIZE`` -- stack size (default
+  ``DEFAULT_TASK_STACKSIZE``)
 
 Usage
 =====
 
-QEMU example
-------------
-For this example, we're using **QEMU** and **aarch64-none-elf-gcc** with the **qemu-armv8a** board.
+.. code-block:: console
 
-1. Configure ``./tools/configure.sh -E qemu-armv8a:nsh`` and make sure ``CONFIG_SYSTEM_GPROF`` and ``CONFIG_PROFILE_MINI`` are enabled
-2. Build ``make -j``
-3. Launch qemu::
+   gprof start
+   gprof stop
+   gprof dump [output]
+   gprof help
 
-    qemu-system-aarch64 -cpu cortex-a53 -smp 4 -nographic \
-      -machine virt,virtualization=on,gic-version=3 \
-      -chardev stdio,id=con,mux=on -serial chardev:con \
-      -mon chardev=con,mode=readline -semihosting -kernel ./nuttx
+Subcommands
+===========
 
-4. Mount hostfs for saving data later::
+start
+-----
 
-    nsh> mount -t hostfs -o fs=. /mnt
+Begin profiling.  Calls ``monstartup()`` with the text-section boundaries
+(``_stext`` to ``_etext``) and then enables sampling via ``moncontrol(1)``.
 
-5. Start profiling::
+stop
+----
 
-    nsh> gprof start
+Disable sampling by calling ``moncontrol(0)``.  Profiling data remains in
+memory and can be dumped later.
 
-6. Do some test and stop profiling::
+dump [output]
+-------------
 
-    nsh> gprof stop
+Write collected profiling data to a file and release the associated
+resources.  Calls ``_mcleanup()`` internally.
 
-7. Dump profiling data::
+By default the output file is ``gmon.out`` in the current working
+directory.  When *output* is specified it is used as the file-name prefix
+via the ``GMON_OUT_PREFIX`` environment variable; the actual file will be
+named ``<output>.0`` (the suffix is appended by the gmon writer).
 
-    nsh> gprof dump /mnt/gmon.out
+.. note::
 
-8. Analyze the data on host using gprof tool::
+   The ``dump`` subcommand requires ``CONFIG_DISABLE_ENVIRON`` to be
+   ``n`` so that ``setenv()`` is available.  On configurations that
+   disable the environment, ``dump`` prints an error message and does
+   not write a file.
 
-    $ aarch64-none-elf-gprof nuttx gmon.out -b
+help
+----
 
-.. note:: The saved file format complies with the standard gprof format.
-  For detailed instructions on gprof command usage, please refer to the GNU gprof manual:
-  https://ftp.gnu.org/old-gnu/Manuals/gprof-2.9.1/html_mono/gprof.html
+Print a short usage summary and exit.
 
-Example output::
+Examples
+========
 
-    $ aarch64-none-elf-gprof nuttx gmon.out -b
-    Flat profile:
+Profile a section of code interactively:
 
-    Each sample counts as 0.001 seconds.
-      %   cumulative   self              self     total
-     time   seconds   seconds    calls   s/call   s/call  name
-     75.58     12.44    12.44    12462     0.00     0.00  up_idle
-     24.30     16.44     4.00        4     1.00     1.00  up_ndelay
-      0.05     16.45     0.01      177     0.00     0.00  pl011_txint
-      0.02     16.45     0.00       35     0.00     0.00  uart_readv
+.. code-block:: console
 
-This output shows the performance profile of the program,
-including execution time and call counts for each function.
-The flat profile table provides a quick overview of where the program spends most of its time.
-This information can be used to identify performance bottlenecks and optimize critical parts of the code.
+   nsh> gprof start
+   nsh> <run the workload to be profiled>
+   nsh> gprof stop
+   nsh> gprof dump
 
-Real board example
-------------------
-Let take **esp32s3-devkit** as an example.
+Dump to a custom file name:
 
-Test the flat profile
-~~~~~~~~~~~~~~~~~~~~~
-1. Configure ``./tools/configure.sh -E esp32s3-devkit:nsh`` and make sure these items are enabled::
+.. code-block:: console
 
-    # for gprof
-    CONFIG_PROFILE_MINI=y
-    CONFIG_SYSTEM_GPROF=y
+   nsh> gprof dump /tmp/my_profile
 
-    # save and transfer data
-    CONFIG_FS_TMPFS=y
-    CONFIG_SYSTEM_YMODEM=y
+The resulting ``/tmp/my_profile.0`` can be copied to the host and analysed:
 
-2. Build and flash ``make flash ESPTOOL_PORT=/dev/ttyUSB0 -j``
-3. Run ``minicom -D /dev/ttyUSB0 -b 115200`` to connect to the board
-4. Start profiling::
+.. code-block:: console
 
-    nsh> gprof start
+   $ arm-none-eabi-objcopy --update-section .gmon/data=my_profile.0 nuttx
+   $ arm-none-eabi-gprof nuttx
 
-    # do some test here, such as ostest
+Automatic dump on exit
+======================
 
-    nsh> gprof stop
-    nsh> gprof dump /tmp/gmon.out
-    nsh> sb /tmp/gmon.out
+When ``CONFIG_PROFILE_DUMP_ON_EXIT`` is enabled, profiling data is written
+automatically when the profiled process exits.  In that case there is no
+need to call ``gprof dump`` explicitly.
 
-5. Receive the file on PC, and analyze the data on host::
+Notes
+=====
 
-    $ cp nuttx nuttx_prof
-    $ xtensa-esp32s3-elf-objcopy -I elf32-xtensa-le --rename-section .flash.text=.text nuttx_prof
-    $ xtensa-esp32s3-elf-gprof nuttx_prof gmon.out
+- Profiling data structures are allocated by ``monstartup()``.  Starting
+  profiling a second time without dumping first will silently discard the
+  previous data.
 
-Test the call graph profile
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-1. Add compiler option ``-pg`` to the component, such as ostest Makefile, like: ``CFLAGS += -pg``
-2. Enable the configuration item ``CONFIG_FRAME_POINTER``
-
-The other steps are the same as the flat profile.
+- The ``gprof`` command itself must also be built with profiling
+  instrumentation if you want to profile it; normally it is only used as a
+  controller for profiling other code.

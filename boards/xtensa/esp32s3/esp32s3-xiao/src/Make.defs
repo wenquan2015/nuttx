@@ -22,11 +22,8 @@
 
 CSRCS = esp32s3_boot.c esp32s3_bringup.c
 
-ifeq ($(CONFIG_BOARDCTL),y)
-CSRCS += esp32s3_appinit.c
 ifeq ($(CONFIG_BOARDCTL_RESET),y)
 CSRCS += esp32s3_reset.c
-endif
 endif
 
 ifeq ($(CONFIG_ARCH_LEDS),y)
@@ -37,6 +34,10 @@ endif
 
 ifeq ($(CONFIG_DEV_GPIO),y)
 CSRCS += esp32s3_gpio.c
+endif
+
+ifeq ($(CONFIG_ESP32S3_SPI),y)
+CSRCS += esp32s3_board_spi.c
 endif
 
 DEPPATH += --dep-path board

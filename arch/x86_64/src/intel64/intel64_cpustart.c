@@ -27,12 +27,13 @@
 #include <nuttx/config.h>
 
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <arch/arch.h>
 #include <arch/irq.h>
 #include <nuttx/arch.h>
 #include <nuttx/spinlock.h>
+#include <nuttx/tls.h>
 
 #include "sched/sched.h"
 #include "init/init.h"
@@ -70,15 +71,9 @@ extern uint64_t get_tsc_adjust(void);
 
 static int x86_64_ap_startup(int cpu)
 {
-  uint64_t dest   = 0;
-  uint64_t vect   = 0;
-  uint64_t regval = 0;
+  uint64_t vect = 0;
 
   sinfo("cpu=%d\n", cpu);
-
-  /* Get destination - must be LOAPIC id */
-
-  dest = MSR_X2APIC_DESTINATION((uint64_t)x86_64_cpu_to_loapic(cpu));
 
   /* Get the AP trampoline from a fixed address */
 
@@ -86,9 +81,7 @@ static int x86_64_ap_startup(int cpu)
 
   /* Send an INIT IPI to the CPU */
 
-  regval = MSR_X2APIC_ICR_INIT | MSR_X2APIC_ICR_ASSERT
-           | MSR_X2APIC_ICR_LEVEL | dest;
-  write_msr(MSR_X2APIC_ICR, regval);
+  x86_64_icr_write(cpu, APIC_ICR_INIT | APIC_ICR_ASSERT | APIC_ICR_LEVEL);
 
   /* Wait for 10 ms */
 
@@ -97,8 +90,7 @@ static int x86_64_ap_startup(int cpu)
 
   /* Send an STARTUP IPI to the CPU */
 
-  regval = MSR_X2APIC_ICR_STARTUP | dest | vect;
-  write_msr(MSR_X2APIC_ICR, regval);
+  x86_64_icr_write(cpu, APIC_ICR_STARTUP | vect);
 
   /* Wait for AP ready */
 

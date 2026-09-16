@@ -33,7 +33,7 @@
 #include <time.h>
 #include <string.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 #include <endian.h>
 
@@ -61,6 +61,7 @@
 #include "chip.h"
 #include "hardware/imx9_enet.h"
 #include "imx9_enet.h"
+#include "imx9_clockconfig.h"
 
 #include "imx9_ccm.h"
 #include "imx9_iomuxc.h"
@@ -128,16 +129,6 @@
 
 #define PHY_RESET_WAIT_COUNT (10)
 
-/* Estimate the MII_SPEED in order to get an MDC close to 2.5MHz,
- * based on the internal module (ENET) clock:
-
- * MII clock frequency = 133 MHz / ((26 + 1) x 2) = 2.5 MHz
- *
- * TODO: This is hard-coded for now, could be properly calculated
- */
-
-#define IMX9_MII_SPEED  26
-
 /* Interrupt groups */
 
 #define RX_INTERRUPTS     (ENET_INT_RXF | ENET_INT_RXB)
@@ -182,6 +173,7 @@ enum phy_type_t
 struct imx9_driver_s
 {
   struct net_driver_s          dev;         /* Interface understood by the network */
+  int                          intf;        /* Interface number within the driver */
   const uint32_t               base;        /* Base address of ENET controller */
   const int                    clk_gate;    /* Enet clock gate */
   const int                    irq;         /* Enet interrupt */
@@ -1440,7 +1432,14 @@ static int imx9_ifup(struct net_driver_s *dev)
 {
   /* The externally available ifup action includes resetting the phy */
 
-  return imx9_ifup_action(dev, true);
+  int ret = imx9_ifup_action(dev, true);
+
+  if (ret == OK)
+    {
+      netdev_carrier_on(dev);
+    }
+
+  return ret;
 }
 
 /****************************************************************************
@@ -1492,6 +1491,8 @@ static int imx9_ifdown(struct net_driver_s *dev)
   /* Mark the device "down" */
 
   priv->bifup = false;
+
+  netdev_carrier_off(dev);
 
   return OK;
 }
@@ -1918,12 +1919,43 @@ static int imx9_phyintenable(struct imx9_driver_s *priv)
 
 static void imx9_initmii(struct imx9_driver_s *priv)
 {
-  /* Speed is based on the peripheral (bus) clock; hold time is 2 module
-   * clock.  This hold time value may need to be increased on some platforms
+  uint32_t divider;
+  uint32_t freq = 0;
+
+  /* Wakeup_axi_clk is root clock for MII */
+
+  imx9_get_rootclock(CCM_WAKEUP_AXI_CLK_ROOT, &freq);
+  if (!freq)
+    {
+       nerr("Root clock is zero\n");
+       return;
+    }
+
+  /* MII clock frequency must be <= 2,5 MHz
+   *
+   * Divider = (root clock / (2 * 2,5MHZ)) - 1
+   *
+   */
+
+  divider = freq / 5000000;
+
+  /* round up */
+
+  if (freq % 5000000)
+    {
+      divider++;
+    }
+
+  divider--;
+
+  DEBUGASSERT(divider > 0 && divider < 64);
+
+  /* Hold time is 2 module clock.  This hold time value may need
+   * to be increased on some platforms
    */
 
   imx9_enet_putreg32(priv, ENET_MSCR_HOLDTIME_2CYCLES |
-                      IMX9_MII_SPEED << ENET_MSCR_MII_SPEED_SHIFT,
+                      divider << ENET_MSCR_MII_SPEED_SHIFT,
                       IMX9_ENET_MSCR_OFFSET);
 }
 
@@ -2169,6 +2201,17 @@ static int imx9_determine_phy(struct imx9_driver_s *priv)
   uint8_t last_phyaddr = 0;
   int retries;
   int ret;
+
+#ifdef CONFIG_IMX9_ENET_PHYINIT
+  /* Perform any necessary, one-time, board-specific PHY initialization */
+
+  ret = imx9_phy_boardinitialize(priv->intf);
+  if (ret < 0)
+    {
+      nerr("ERROR: Failed to initialize the PHY: %d\n", ret);
+      return ret;
+    }
+#endif
 
   for (i = 0; i < priv->n_phys; i++)
     {
@@ -3201,6 +3244,7 @@ int imx9_netinitialize(int intf)
   /* Get the interface structure associated with this interface number. */
 
   priv = &g_enet[intf];
+  priv->intf = intf;
 
   /* Disable the ENET clock */
 
@@ -3290,17 +3334,6 @@ int imx9_netinitialize(int intf)
   mac[4] = (uidl &  0x0000ff00) >> 8;
   mac[5] = (uidl &  0x000000ff);
 
-#endif
-
-#ifdef CONFIG_IMX9_ENET_PHYINIT
-  /* Perform any necessary, one-time, board-specific PHY initialization */
-
-  ret = imx9_phy_boardinitialize(intf);
-  if (ret < 0)
-    {
-      nerr("ERROR: Failed to initialize the PHY: %d\n", ret);
-      return ret;
-    }
 #endif
 
   /* Put the interface in the down state.  This usually amounts to resetting

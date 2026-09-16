@@ -29,7 +29,7 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/board.h>
@@ -70,7 +70,7 @@
  * .bss in some RAM.  We refer to that RAM as the primary RAM.  It also
  * holds the IDLE threads stack and any remaining portion of the primary
  * OCRAM is automatically added to the heap.  The linker provided address,
- * ... .sbss, .ebss, .sdat, etc. ...  are expected to lie in the the region
+ * ... .sbss, .ebss, .sdat, etc. ...  are expected to lie in the region
  * defined by the OCRAM configuration settings.
  *
  * Other RAM regions must be selected use configuration options and the
@@ -385,6 +385,7 @@ void up_allocate_kheap(void **heap_start, size_t *heap_size)
                     CONFIG_MM_KERNEL_HEAPSIZE;
   size_t    usize = PRIMARY_RAM_END - ubase;
   int       log2;
+
   DEBUGASSERT(ubase < (uintptr_t)PRIMARY_RAM_END);
 
   /* Adjust that size to account for MPU alignment requirements.

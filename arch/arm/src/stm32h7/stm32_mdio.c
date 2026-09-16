@@ -24,13 +24,23 @@
  * Included Files
  ****************************************************************************/
 
-#include <arm_internal.h>
+#include <nuttx/mutex.h>
+#include <nuttx/config.h>
+#include <nuttx/nuttx.h>
+
+#include <nuttx/debug.h>
+#include <errno.h>
+#include <inttypes.h>
+
+#include "arm_internal.h"
+#include "stm32_mdio.h"
+#include "hardware/stm32_ethernet.h"
 
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
 
-#ifdef CONFIG_STM32H7_ETHMAC_REGDEBUG
+#ifdef CONFIG_STM32_ETHMAC_REGDEBUG
 static uint32_t stm32_getreg(uint32_t addr);
 static void stm32_putreg(uint32_t val, uint32_t addr);
 static void stm32_checksetup(void);
@@ -41,28 +51,14 @@ static void stm32_checksetup(void);
 #endif
 
 /****************************************************************************
- * Included Files
- ****************************************************************************/
-
-#include <nuttx/mutex.h>
-#include <nuttx/config.h>
-
-#include <debug.h>
-#include <errno.h>
-#include <inttypes.h>
-
-#include "stm32_mdio.h"
-#include "hardware/stm32_ethernet.h"
-
-/****************************************************************************
  * Private Types
  ****************************************************************************/
 
-struct stm32_mdio_bus_s
+struct stm32_mdio_lowerhalf_s
 {
-  struct mdio_lowerhalf_s *lower;
+  struct mdio_lowerhalf_s base;
 
-  /* MDIO bus timeout in milliseconds */
+  /* MDIO bus timeout in microseconds */
 
   int timeout;
 };
@@ -88,15 +84,13 @@ const struct mdio_ops_s g_stm32_mdio_ops =
   .reset = NULL,
 };
 
-struct mdio_lowerhalf_s g_stm32_mdio_lowerhalf =
+struct stm32_mdio_lowerhalf_s g_stm32_mdio_lowerhalf =
 {
-  .ops = &g_stm32_mdio_ops
-};
-
-struct stm32_mdio_bus_s g_stm32_mdio_bus =
-{
-  .lower = &g_stm32_mdio_lowerhalf,
-  .timeout = 10
+  .base =
+    {
+      .ops = &g_stm32_mdio_ops
+    },
+  .timeout = 10000
 };
 
 /****************************************************************************
@@ -110,7 +104,8 @@ static int stm32_c22_read(struct mdio_lowerhalf_s *dev, uint8_t phydev,
   uint32_t regval;
 
   int retval = -ETIMEDOUT;
-  struct stm32_mdio_bus_s *priv = (struct stm32_mdio_bus_s *)dev;
+  struct stm32_mdio_lowerhalf_s *priv =
+         container_of(dev, struct stm32_mdio_lowerhalf_s, base);
 
   /* Configure the MACMDIOAR register, preserving CSR Clock Range CR[3:0]
    * bits
@@ -131,9 +126,14 @@ static int stm32_c22_read(struct mdio_lowerhalf_s *dev, uint8_t phydev,
 
   stm32_putreg(regval, STM32_ETH_MACMDIOAR);
 
-  /* Wait for the transfer to complete */
+  /* Wait for the transfer to complete.  A Clause 22 frame is 64 MDC
+   * cycles, about 30 us at a 2.5 MHz MDC, so poll at a fraction of that.
+   * A millisecond delay here turns every PHY register access into a
+   * busy-wait far longer than the transfer, and the autonegotiation link
+   * wait in stm32_phyinit() issues thousands of them.
+   */
 
-  for (to = priv->timeout; to >= 0; to--)
+  for (to = priv->timeout; to > 0; to -= 10)
     {
       if ((stm32_getreg(STM32_ETH_MACMDIOAR) & ETH_MACMDIOAR_MB) == 0)
         {
@@ -142,10 +142,10 @@ static int stm32_c22_read(struct mdio_lowerhalf_s *dev, uint8_t phydev,
           break;
         }
 
-      up_mdelay(5);
+      up_udelay(10);
     }
 
-  if (to <= 0)
+  if (retval < 0)
     {
       ninfo("MII transfer timed out: phydev: %04x regaddr: %04x\n",
             phydev, regaddr);
@@ -161,7 +161,8 @@ static int stm32_c22_write(struct mdio_lowerhalf_s *dev, uint8_t phydev,
   uint32_t regval;
 
   int retval = -ETIMEDOUT;
-  struct stm32_mdio_bus_s *priv = (struct stm32_mdio_bus_s *)dev;
+  struct stm32_mdio_lowerhalf_s *priv =
+         container_of(dev, struct stm32_mdio_lowerhalf_s, base);
 
   /* Configure the MACMDIOAR register, preserving CSR Clock Range CR[3:0]
    * bits
@@ -178,7 +179,7 @@ static int stm32_c22_write(struct mdio_lowerhalf_s *dev, uint8_t phydev,
 
   regval |= (((uint32_t)phydev << ETH_MACMDIOAR_PA_SHIFT) &
             ETH_MACMDIOAR_PA_MASK);
-  regval |= (((uint32_t)phydev << ETH_MACMDIOAR_RDA_SHIFT) &
+  regval |= (((uint32_t)regaddr << ETH_MACMDIOAR_RDA_SHIFT) &
             ETH_MACMDIOAR_RDA_MASK);
   regval |= (ETH_MACMDIOAR_MB | ETH_MACMDIOAR_GOC_WRITE);
 
@@ -191,7 +192,7 @@ static int stm32_c22_write(struct mdio_lowerhalf_s *dev, uint8_t phydev,
 
   /* Wait for the transfer to complete */
 
-  for (to = priv->timeout; to >= 0; to--)
+  for (to = priv->timeout; to > 0; to -= 10)
     {
       if ((stm32_getreg(STM32_ETH_MACMDIOAR) & ETH_MACMDIOAR_MB) == 0)
         {
@@ -199,10 +200,10 @@ static int stm32_c22_write(struct mdio_lowerhalf_s *dev, uint8_t phydev,
           break;
         }
 
-      up_mdelay(5);
+      up_udelay(10);
     }
 
-  if (to <= 0)
+  if (retval < 0)
     {
       ninfo("MII transfer timed out: phydevaddr: %04x phyregaddr: %04x"
             "value: %04x\n", phydev, regaddr, value);
@@ -228,5 +229,5 @@ static int stm32_c22_write(struct mdio_lowerhalf_s *dev, uint8_t phydev,
 
 struct mdio_bus_s *stm32_mdio_bus_initialize(void)
 {
-  return mdio_register(&g_stm32_mdio_lowerhalf);
+  return mdio_register(&g_stm32_mdio_lowerhalf.base);
 }

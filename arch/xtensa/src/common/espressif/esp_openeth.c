@@ -26,7 +26,7 @@
 
 #include <nuttx/config.h>
 
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/kmalloc.h>
 #include <netinet/if_ether.h>
@@ -366,7 +366,7 @@ static int openeth_ifdown(struct netdev_lowerhalf_s *dev)
 
   /* Disable TX and RX */
 
-  openeth_enable();
+  openeth_disable();
 
   leave_critical_section(flags);
 
@@ -424,6 +424,7 @@ static int openeth_set_addr(uint8_t *addr)
 
   uint32_t mac0_u32;
   uint32_t mac1_u32;
+
   memcpy(&mac0_u32, &mac0, 4);
   memcpy(&mac1_u32, &mac1, 4);
   REG_WRITE(OPENETH_MAC_ADDR0_REG, mac0_u32);
@@ -514,14 +515,21 @@ int esp_openeth_initialize(void)
 
   /* Setup interrupts */
 
-  priv->cpuint = OPENETH_SETUP_IRQ(0, OPENETH_PERIPH_MAC,
-                                 1, OPENETH_CPUINT_LEVEL);
+  priv->cpuint = OPENETH_SETUP_IRQ(OPENETH_PERIPH_MAC,
+                                   1, OPENETH_CPUINT_LEVEL,
+                                   openeth_isr_handler, priv);
   if (priv->cpuint < 0)
     {
       nerr("ERROR: Failed allocate interrupt\n");
       ret = -ENOMEM;
       goto err;
     }
+
+  /* The interrupt is attached but still masked at the CPU; without this
+   * call it never fires, so received frames are only picked up on a TX.
+   */
+
+  up_enable_irq(OPENETH_IRQ_MAC);
 
   /* Initialize the MAC */
 
@@ -530,10 +538,6 @@ int esp_openeth_initialize(void)
   memcpy(priv->dev.netdev.d_mac.ether.ether_addr_octet,
     "\x00\x02\x03\x04\x05\x06\x07\x08", ETH_ALEN);
   openeth_set_addr(priv->dev.netdev.d_mac.ether.ether_addr_octet);
-
-  /* Attach the interrupt */
-
-  ret = irq_attach(OPENETH_IRQ_MAC, openeth_isr_handler, priv);
 
   /* Register the device with the OS so that socket IOCTLs can be
    * performed.

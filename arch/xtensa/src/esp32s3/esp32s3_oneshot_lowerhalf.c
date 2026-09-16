@@ -25,7 +25,7 @@
 #include <nuttx/config.h>
 
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -155,7 +155,7 @@ static int oneshot_lh_max_delay(struct oneshot_lowerhalf_s *lower,
   ts->tv_sec  = UINT32_MAX;
   ts->tv_nsec = NSEC_PER_SEC - 1;
 
-  tmrinfo("max sec=%" PRIu32 "\n", ts->tv_sec);
+  tmrinfo("max sec=%jd\n", (intmax_t)ts->tv_sec);
   tmrinfo("max nsec=%ld\n", ts->tv_nsec);
 
   return OK;

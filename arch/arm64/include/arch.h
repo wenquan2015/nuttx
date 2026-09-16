@@ -39,15 +39,13 @@
 #endif
 
 #include <nuttx/irq.h>
+#include <arch/barriers.h>
 
 /****************************************************************************
  * Pre-processor Prototypes
  ****************************************************************************/
 
 #ifdef CONFIG_ARCH_ADDRENV
-#if CONFIG_MM_PGSIZE != 4096
-#  error Only pages sizes of 4096 are currently supported (CONFIG_ARCH_ADDRENV)
-#endif
 
 /* All implementations have 4 levels of page tables */
 
@@ -55,6 +53,9 @@
 #define ARCH_SPGTS          (ARCH_PGT_MAX_LEVELS - 1)
 
 #endif /* CONFIG_ARCH_ADDRENV */
+
+#define UP_WFE() __asm__ __volatile__ ("wfe" : : : "memory")
+#define UP_SEV() __asm__ __volatile__ ("sev" : : : "memory")
 
 /****************************************************************************
  * Inline functions

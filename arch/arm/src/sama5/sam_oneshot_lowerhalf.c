@@ -31,8 +31,8 @@
 #include <limits.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
 
+#include <nuttx/debug.h>
 #include <nuttx/irq.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/timers/oneshot.h>
@@ -154,8 +154,8 @@ static int sam_max_delay(struct oneshot_lowerhalf_s *lower,
       uint64_t sec = usecs / 1000000;
       usecs -= 1000000 * sec;
 
-      ts->tv_sec  = (time_t)sec;
-      ts->tv_nsec = (long)(usecs * 1000);
+      ts->tv_sec  = sec;
+      ts->tv_nsec = usecs * 1000;
     }
 
   return ret;

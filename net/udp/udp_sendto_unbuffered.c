@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <assert.h>
 
 #include <nuttx/semaphore.h>
@@ -144,8 +144,8 @@ static inline void sendto_ipselect(FAR struct net_driver_s *dev,
  *
  ****************************************************************************/
 
-static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
-                                    FAR void *pvpriv, uint16_t flags)
+static uint32_t sendto_eventhandler(FAR struct net_driver_s *dev,
+                                    FAR void *pvpriv, uint32_t flags)
 {
   FAR struct sendto_s *pstate = pvpriv;
 
@@ -163,7 +163,7 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
           return flags;
         }
 
-      ninfo("flags: %04x\n", flags);
+      ninfo("flags: %" PRIx32 "\n", flags);
 
       /* If the network device has gone down, then we will have terminate
        * the wait now with an error.
@@ -219,9 +219,9 @@ static uint16_t sendto_eventhandler(FAR struct net_driver_s *dev,
                 iob_update_pktlen(dev->d_iob, udpip_hdrsize(pstate->st_conn),
                                   false);
                 dev->d_sndlen = 0;
-                dev->d_len = dev->d_iob->io_pktlen;
             }
 
+          dev->d_len = dev->d_iob->io_pktlen;
 #ifdef NEED_IPDOMAIN_SUPPORT
           /* If both IPv4 and IPv6 support are enabled, then we will need to
            * select which one to use when generating the outgoing packet.
@@ -329,7 +329,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 
 #if defined(CONFIG_NET_ARP_SEND) || defined(CONFIG_NET_ICMPv6_NEIGHBOR)
 #ifdef CONFIG_NET_ARP_SEND
-  /* Assure the the IPv4 destination address maps to a valid MAC address in
+  /* Assure the IPv4 destination address maps to a valid MAC address in
    * the ARP table.
    */
 
@@ -366,7 +366,7 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 #endif /* CONFIG_NET_ARP_SEND */
 
 #ifdef CONFIG_NET_ICMPv6_NEIGHBOR
-  /* Assure the the IPv6 destination address maps to a valid MAC address in
+  /* Assure the IPv6 destination address maps to a valid MAC address in
    * the neighbor table.
    */
 
@@ -457,9 +457,9 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 
   /* Make sure that the device is in the UP state */
 
-  if ((state.st_dev->d_flags & IFF_UP) == 0)
+  if (IFF_IS_RUNNING(state.st_dev->d_flags) == 0)
     {
-      nwarn("WARNING: device is DOWN\n");
+      nwarn("WARNING: device is not running\n");
       return -EHOSTUNREACH;
     }
 
@@ -471,23 +471,22 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
   state.st_cb = udp_callback_alloc(state.st_dev, conn);
   if (state.st_cb)
     {
-      state.st_cb->flags   = (UDP_POLL | NETDEV_DOWN);
-      state.st_cb->priv    = (FAR void *)&state;
-      state.st_cb->event   = sendto_eventhandler;
-
-      conn_dev_unlock(&conn->sconn, state.st_dev);
+      state.st_cb->flags = (UDP_POLL | NETDEV_DOWN);
+      state.st_cb->priv  = (FAR void *)&state;
+      state.st_cb->event = sendto_eventhandler;
 
       /* Notify the device driver of the availability of TX data */
 
-      netdev_txnotify_dev(state.st_dev);
+      netdev_txnotify_dev(state.st_dev, UDP_POLL);
 
       /* Wait for either the receive to complete or for an error/timeout to
-       * occur. NOTES:  net_sem_timedwait will also terminate if a signal
+       * occur. NOTES: conn_dev_sem_timedwait will also terminate if a signal
        * is received.
        */
 
-      ret = net_sem_timedwait(&state.st_sem,
-                          _SO_TIMEOUT(conn->sconn.s_sndtimeo));
+      ret = conn_dev_sem_timedwait(&state.st_sem, true,
+                                   _SO_TIMEOUT(conn->sconn.s_sndtimeo),
+                                   &conn->sconn, state.st_dev);
       if (ret >= 0)
         {
           /* The result of the sendto operation is the number of bytes
@@ -496,8 +495,6 @@ ssize_t psock_udp_sendto(FAR struct socket *psock, FAR const void *buf,
 
           ret = state.st_sndlen;
         }
-
-      conn_dev_lock(&conn->sconn, state.st_dev);
 
       /* Make sure that no further events are processed */
 

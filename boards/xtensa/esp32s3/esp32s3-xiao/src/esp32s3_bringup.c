@@ -33,12 +33,32 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <errno.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/himem/himem.h>
+#include <nuttx/power/pm.h>
 #include <arch/board/board.h>
+
+#include "espressif/esp_gpio.h"
+#include "esp32s3_start.h"
+
+#ifdef CONFIG_ESPRESSIF_HR_TIMER
+#  include "espressif/esp_hr_timer.h"
+#endif
+
+#ifdef CONFIG_ESPRESSIF_WIFI
+#  include "esp32s3_board_wlan.h"
+#endif
+
+#ifdef CONFIG_ESP32S3_I2C
+#  include "esp32s3_i2c.h"
+#endif
+
+#if defined(CONFIG_ESP32S3_SDMMC) || defined(CONFIG_MMCSD_SPI)
+#  include "esp32s3_board_sdmmc.h"
+#endif
 
 #include "esp32s3-xiao.h"
 
@@ -59,14 +79,19 @@
  *   CONFIG_BOARD_LATE_INITIALIZE=y :
  *     Called from board_late_initialize().
  *
- *   CONFIG_BOARD_LATE_INITIALIZE=n && CONFIG_BOARDCTL=y :
- *     Called from the NSH library
- *
  ****************************************************************************/
 
 int esp32s3_bringup(void)
 {
   int ret;
+
+#ifdef CONFIG_ESPRESSIF_HR_TIMER
+  ret = esp_hr_timer_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: esp_hr_timer_init() failed: %d\n", ret);
+    }
+#endif
 
 #ifdef CONFIG_FS_PROCFS
   /* Mount the procfs file system */
@@ -105,6 +130,55 @@ int esp32s3_bringup(void)
     {
       syslog(LOG_ERR, "ERROR: userled_lower_initialize() failed: %d\n", ret);
     }
+#endif
+
+#ifdef CONFIG_MMCSD_SPI
+  ret = board_sdmmc_spi_initialize();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize SDMMC: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_I2C_DRIVER
+  /* Configure I2C peripheral interfaces */
+
+  ret = board_i2c_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "Failed to initialize I2C driver: %d\n", ret);
+    }
+#endif
+
+#ifdef CONFIG_SENSORS_LSM6DS3TRC
+  /* Try to register the LSM6DS3TR-C device on I2C0 (D4/D5 = SDA/SCL) */
+
+  ret = board_lsm6ds3trc_initialize(0, ESP32S3_I2C0);
+  if (ret < 0)
+    {
+      syslog(LOG_ERR,
+             "Failed to initialize LSM6DS3TR-C driver for I2C0: %d\n",
+             ret);
+    }
+#endif
+
+#ifdef CONFIG_ESPRESSIF_WIFI
+#  ifdef CONFIG_PM
+  /* Wi-Fi radio calibration can't tolerate PM_STANDBY light sleep. */
+
+  pm_stay(PM_IDLE_DOMAIN, PM_IDLE);
+#  endif
+
+  ret = board_wlan_init();
+  if (ret < 0)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize wlan subsystem=%d\n",
+             ret);
+    }
+
+#  ifdef CONFIG_PM
+  pm_relax(PM_IDLE_DOMAIN, PM_IDLE);
+#  endif
 #endif
 
   /* If we got here then perhaps not all initialization was successful, but

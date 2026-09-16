@@ -50,7 +50,7 @@
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <netinet/in.h>
 
@@ -535,6 +535,7 @@ int tcp_selectport(uint8_t domain,
             {
               /* We have looped back, failed. */
 
+              tcp_conn_list_unlock();
               return -EADDRINUSE;
             }
         }
@@ -558,6 +559,7 @@ int tcp_selectport(uint8_t domain,
         {
           /* It is in use... return EADDRINUSE */
 
+          tcp_conn_list_unlock();
           return -EADDRINUSE;
         }
     }
@@ -784,10 +786,6 @@ void tcp_free(FAR struct tcp_conn_s *conn)
       return;
     }
 
-  /* Cancel tcp timer */
-
-  tcp_stop_timer(conn);
-
   /* Make sure monitor is stopped. */
 
   conn_dev_lock(&conn->sconn, conn->dev);
@@ -817,6 +815,10 @@ void tcp_free(FAR struct tcp_conn_s *conn)
       dq_rem(&conn->sconn.node, &g_active_tcp_connections);
       tcp_conn_list_unlock();
     }
+
+  /* Cancel tcp timer */
+
+  tcp_stop_timer(conn);
 
   nxrmutex_destroy(&conn->sconn.s_lock);
   tcp_free_rx_buffers(conn);
@@ -1142,16 +1144,14 @@ FAR struct tcp_conn_s *tcp_alloc_accept(FAR struct net_driver_s *dev,
       conn->tcpstateflags    = TCP_SYN_RCVD;
 
       tcp_initsequence(conn);
-#if !defined(CONFIG_NET_TCP_WRITE_BUFFERS)
       conn->rexmit_seq       = tcp_getsequence(conn->sndseq);
-#endif
 
       conn->tx_unacked       = 1;
 #ifdef CONFIG_NET_TCP_WRITE_BUFFERS
       conn->expired          = 0;
       conn->isn              = 0;
       conn->sent             = 0;
-      conn->sndseq_max       = 0;
+      conn->sndseq_max       = tcp_getsequence(conn->sndseq) + 1;
 #endif
 
 #ifdef CONFIG_NET_TCP_CC_NEWRENO
@@ -1454,22 +1454,21 @@ int tcp_connect(FAR struct tcp_conn_s *conn, FAR const struct sockaddr *addr)
   conn->sa         = 0;
   conn->sv         = 16;   /* Initial value of the RTT variance. */
   conn->lport      = (uint16_t)port;
-#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
-  conn->expired    = 0;
-  conn->isn        = 0;
-  conn->sent       = 0;
-  conn->sndseq_max = 0;
-#endif
 
   /* Set initial sndseq when we have both local/remote addr and port */
 
   tcp_initsequence(conn);
 
+#ifdef CONFIG_NET_TCP_WRITE_BUFFERS
+  conn->expired    = 0;
+  conn->isn        = 0;
+  conn->sent       = 0;
+  conn->sndseq_max = tcp_getsequence(conn->sndseq) + 1;
+#endif
+
   /* Save initial sndseq to rexmit_seq, otherwise it will be zero */
 
-#if !defined(CONFIG_NET_TCP_WRITE_BUFFERS)
   conn->rexmit_seq = tcp_getsequence(conn->sndseq);
-#endif
 
 #ifdef CONFIG_NET_TCP_CC_NEWRENO
   /* Initialize the variables of congestion control. */

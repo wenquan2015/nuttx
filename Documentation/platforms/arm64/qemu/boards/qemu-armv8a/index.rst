@@ -78,6 +78,45 @@ Running with QEMU:
     -net none -chardev stdio,id=con,mux=on -serial chardev:con \
     -mon chardev=con,mode=readline -kernel ./nuttx
 
+S2OPC
+-----
+
+The ``qemu-armv8a:s2opc`` configuration provides the S2OPC OPC UA server
+example.  Build it from the NuttX source directory::
+
+  $ ./tools/configure.sh -l qemu-armv8a:s2opc
+  $ make -j
+
+Run QEMU with user networking and forward host TCP port 4841 to NuttX::
+
+  $ qemu-system-aarch64 -cpu cortex-a53 -nographic \
+      -machine virt,virtualization=on,gic-version=3 \
+      -global virtio-mmio.force-legacy=false \
+      -chardev stdio,id=con,mux=on -serial chardev:con \
+      -mon chardev=con,mode=readline \
+      -netdev user,id=u1,hostfwd=tcp:127.0.0.1:4841-:4841 \
+      -device virtio-net-device,netdev=u1,bus=virtio-mmio-bus.0 \
+      -kernel ./nuttx
+
+The configured NuttX address and endpoint are ``10.0.2.15`` and
+``opc.tcp://10.0.2.15:4841``.  At the NSH prompt, start the server::
+
+  nsh> ping 10.0.2.2
+  nsh> s2opc &
+  s2opc [4:100]
+
+From another host terminal, read the standard server time node through the
+forwarded port::
+
+  $ uaread -u opc.tcp://127.0.0.1:4841 -n i=2258
+
+Stop the server with the task ID printed by NSH::
+
+  nsh> kill -2 4
+
+See :doc:`/applications/examples/s2opc/index` for command-line overrides and
+:doc:`/applications/netutils/s2opc/index` for toolkit configuration.
+
 ------------------------------------------------------------------
 Single Core with virtio network, block, rng, serial driver (GICv3)
 ------------------------------------------------------------------
@@ -90,7 +129,7 @@ Configuring NuttX and compile:
    $ make
    $ dd if=/dev/zero of=./mydisk-1gb.img bs=1M count=1024
 
-Running with QEMU:
+Running with QEMU (VirtIO-MMIO transport):
 
 .. code:: console
 
@@ -107,6 +146,29 @@ Running with QEMU:
      -drive file=./mydisk-1gb.img,if=none,format=raw,id=hd \
      -device virtio-blk-device,bus=virtio-mmio-bus.3,drive=hd \
      -mon chardev=con,mode=readline -kernel ./nuttx
+
+Running with QEMU (VirtIO-PCI transport):
+
+The netnsh configuration also supports VirtIO-PCI transport. To use VirtIO-PCI
+instead of VirtIO-MMIO, run QEMU with PCI devices:
+
+.. code:: console
+
+   $ qemu-system-aarch64 -cpu cortex-a53 -nographic \
+     -machine virt,virtualization=on,gic-version=3 \
+     -chardev stdio,id=con,mux=on -serial chardev:con \
+     -netdev user,id=u1,hostfwd=tcp:127.0.0.1:10023-10.0.2.15:23,hostfwd=tcp:127.0.0.1:15001-10.0.2.15:5001 \
+     -device virtio-net-pci,netdev=u1 \
+     -device virtio-rng-pci \
+     -drive file=./mydisk-1gb.img,if=none,format=raw,id=hd \
+     -device virtio-blk-pci,drive=hd \
+     -mon chardev=con,mode=readline -kernel ./nuttx
+
+.. note::
+
+   The VirtIO-PCI transport uses PCI bus for device discovery and communication,
+   which is different from the memory-mapped VirtIO-MMIO transport. Both transports
+   are supported simultaneously in the netnsh configuration
 
 ------------------------------------------
 Single Core with virtio gpu driver (GICv3)
@@ -413,52 +475,61 @@ hypervisor but won't work with Jailhouse hypervisor which uses ``ivshmem-v2``.
 Please refer to the official `Qemu ivshmem documentation
 <https://www.qemu.org/docs/master/system/devices/ivshmem.html>`_ for more information.
 
-This is an example implementation for OpenAMP based on the Inter-VM share
-memory(ivshmem)::
+This is an example implementation for OpenAMP that supports multiple transport
+mechanisms including Inter-VM shared memory (ivshmem) and RPMSG port UART::
 
-  rpproxy_ivshmem:  Remote slave(client) proxy process.
-  rpserver_ivshmem: Remote master(host) server process.
+  rpproxy:  Remote slave(client) proxy process.
+  rpserver: Remote master(host) server process.
 
-Steps for Using NuttX as IVSHMEM host and guest
+Steps for Using NuttX as OpenAMP host and guest
 
 1. Build images
 
-   a. Build ``rpserver_ivshmem``
+   a. Build ``rpserver``
 
       .. code:: console
 
-         $ cmake -B server -DBOARD_CONFIG=qemu-armv8a:rpserver_ivshmem -GNinja
+         $ cmake -B server -DBOARD_CONFIG=qemu-armv8a:rpserver -GNinja
          $ cmake --build server
 
-   b. Build ``rpproxy_ivshmem``
+   b. Build ``rpproxy``
 
       .. code:: console
 
-         $ cmake -B proxy -DBOARD_CONFIG=qemu-armv8a:rpproxy_ivshmem -GNinja
+         $ cmake -B proxy -DBOARD_CONFIG=qemu-armv8a:rpproxy -GNinja
          $ cmake --build proxy
 
 2. Bringup firmware via Qemu:
 
-   The Inter-VM Shared Memory device basic syntax is::
+   The configuration supports both ivshmem and RPMSG port UART transports.
+   For ivshmem, use the following device syntax::
 
       -device ivshmem-plain,id=shmem0,memdev=shmmem-shmem0,addr=0xb \
       -object memory-backend-file,id=shmmem-shmem0,mem-path=/dev/shm/ivshmem0,size=4194304,share=yes
 
-   a. Start ``rpserver_ivshmem``
+   For RPMSG port UART, the virtconsole device is used as shown in the examples below.
+
+   a. Start ``rpserver``
 
       .. code:: console
 
          $ qemu-system-aarch64 -cpu cortex-a53 -nographic -machine virt,virtualization=on,gic-version=3 -kernel server/nuttx \
            -device ivshmem-plain,id=shmem0,memdev=shmmem-shmem0,addr=0xb \
-           -object memory-backend-file,id=shmmem-shmem0,mem-path=/dev/shm/ivshmem0,size=4194304,share=yes
+           -object memory-backend-file,id=shmmem-shmem0,mem-path=/dev/shm/ivshmem0,size=4194304,share=yes \
+           -device virtio-serial-device,bus=virtio-mmio-bus.0 \
+           -chardev socket,path=/tmp/rpmsg_port_uart_socket,server=on,wait=off,id=foo \
+           -device virtconsole,chardev=foo
 
-   b. Start ``rpproxy_ivshmem``
+   b. Start ``rpproxy``
 
       .. code:: console
 
          $ qemu-system-aarch64 -cpu cortex-a53 -nographic -machine virt,virtualization=on,gic-version=3 -kernel proxy/nuttx \
            -device ivshmem-plain,id=shmem0,memdev=shmmem-shmem0,addr=0xb \
-           -object memory-backend-file,discard-data=on,id=shmmem-shmem0,mem-path=/dev/shm/ivshmem0,size=4194304,share=yes
+           -object memory-backend-file,discard-data=on,id=shmmem-shmem0,mem-path=/dev/shm/ivshmem0,size=4194304,share=yes \
+           -device virtio-serial-device,bus=virtio-mmio-bus.0 \
+           -chardev socket,path=/tmp/rpmsg_port_uart_socket,server=off,id=foo \
+           -device virtconsole,chardev=foo
 
    c. Check the RPMSG Syslog in rpserver shell:
 
@@ -607,7 +678,7 @@ Status
  Ubuntu PC rather than an Ubuntu at VMWare. For Physical Ubuntu PC, the ostest
  was run for 10 times at least but the crash was never seen again, but it's
  almost crashed every time running the ostest at Virtual Ubuntu in VMWare
- Checking for the the fail point. It's seem at signal routine to access another
+ Checking for the fail point. It's seem at signal routine to access another
  CPU's task context reg will get a NULL pointer, but watch the task context with
  GDB, shows everything as OK. So maybe this is a SMP cache synchronize issue?
  But synchronize operations have been done at thread switch. It is hard to
@@ -914,4 +985,3 @@ References
 6. Arm Generic Interrupt Controller v3 and v4 Overview
 7. Arm® Generic Interrupt Controller Architecture Specification GIC architecture version 3 and version 4
 8. (DEN0022D.b) Arm Power State Coordination Interface Platform Design Document
-

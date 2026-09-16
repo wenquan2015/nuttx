@@ -31,7 +31,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <assert.h>
 #include <arch/irq.h>
 
@@ -161,7 +161,7 @@ static int psock_socketlevel_option(FAR struct socket *psock, int option,
            * options.
            */
 
-           net_lock();
+          conn_lock(conn);
 
           /* Set or clear the option bit */
 
@@ -174,7 +174,7 @@ static int psock_socketlevel_option(FAR struct socket *psock, int option,
               _SO_CLROPT(conn->s_options, option);
             }
 
-          net_unlock();
+          conn_unlock(conn);
         }
         break;
 

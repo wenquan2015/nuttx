@@ -31,7 +31,7 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/net/net.h>
 #include <nuttx/net/netconfig.h>
@@ -95,7 +95,7 @@ static ssize_t    inet_sendto(FAR struct socket *psock, FAR const void *buf,
                               FAR const struct sockaddr *to,
                               socklen_t tolen);
 static ssize_t    inet_sendmsg(FAR struct socket *psock,
-                               FAR struct msghdr *msg, int flags);
+                               FAR const struct msghdr *msg, int flags);
 static ssize_t    inet_recvmsg(FAR struct socket *psock,
                                FAR struct msghdr *msg, int flags);
 static int        inet_ioctl(FAR struct socket *psock,
@@ -253,8 +253,8 @@ static int inet_udp_alloc(FAR struct socket *psock)
 
 static int inet_setup(FAR struct socket *psock)
 {
-  /* Allocate the appropriate connection structure.  This reserves the
-   * the connection structure is is unallocated at this point.  It will
+  /* Allocate the appropriate connection structure.  This reserves
+   * the connection structure, which is unallocated at this point.  It will
    * not actually be initialized until the socket is connected.
    *
    * REVISIT:  Only SOCK_STREAM and SOCK_DGRAM are supported.
@@ -721,12 +721,14 @@ static int inet_get_socketlevel_option(FAR struct socket *psock, int option,
               return -EINVAL;
             }
 
+#  ifdef NET_UDP_HAVE_STACK
           if (psock->s_type == SOCK_DGRAM)
             {
               FAR struct udp_conn_s *conn = psock->s_conn;
               *(FAR int *)value = (conn->timestamp != 0);
             }
           else
+#  endif
             {
               return -ENOPROTOOPT;
             }
@@ -1023,6 +1025,7 @@ static int inet_set_socketlevel_option(FAR struct socket *psock, int option,
               return -EINVAL;
             }
 
+#  ifdef NET_UDP_HAVE_STACK
           if (psock->s_type == SOCK_DGRAM)
             {
               conn_lock(psock->s_conn);
@@ -1038,6 +1041,7 @@ static int inet_set_socketlevel_option(FAR struct socket *psock, int option,
               conn_unlock(psock->s_conn);
             }
           else
+#  endif
             {
               return -ENOPROTOOPT;
             }
@@ -1863,7 +1867,7 @@ static ssize_t inet_sendto(FAR struct socket *psock, FAR const void *buf,
  ****************************************************************************/
 
 static ssize_t inet_sendmsg(FAR struct socket *psock,
-                            FAR struct msghdr *msg, int flags)
+                            FAR const struct msghdr *msg, int flags)
 {
   FAR void *buf = msg->msg_iov->iov_base;
   size_t len = msg->msg_iov->iov_len;

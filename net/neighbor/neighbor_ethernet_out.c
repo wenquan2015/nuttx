@@ -28,7 +28,7 @@
 
 #include <string.h>
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/net/ethernet.h>
 #include <nuttx/net/ip.h>
@@ -135,6 +135,12 @@ void neighbor_ethernet_out(FAR struct net_driver_s *dev)
 
           net_ipv6addr_copy(ipaddr, dev->d_ipv6draddr);
 #endif
+
+          if (net_is_addr_unspecified(ipaddr))
+            {
+              dev->d_len = 0;
+              return;
+            }
         }
       else
         {
@@ -149,7 +155,7 @@ void neighbor_ethernet_out(FAR struct net_driver_s *dev)
 
       if (neighbor_lookup(ipaddr, &laddr) < 0)
         {
-#ifdef CONFIG_NET_ICMPv6
+#ifdef NET_ICMPv6_HAVE_STACK
           /* No ARP packet if this device do not support ARP */
 
           if (IFF_IS_NOARP(dev->d_flags))
@@ -157,7 +163,7 @@ void neighbor_ethernet_out(FAR struct net_driver_s *dev)
               return;
             }
 
-           ninfo("IPv6 Neighbor solicitation for IPv6\n");
+          ninfo("IPv6 Neighbor solicitation for IPv6\n");
 
           /* The destination address was not in our Neighbor Table, so we
            * overwrite the IPv6 packet with an ICMPv6 Neighbor Solicitation

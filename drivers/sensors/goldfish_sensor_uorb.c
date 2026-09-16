@@ -32,7 +32,8 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-#include <debug.h>
+
+#include <nuttx/debug.h>
 #include <nuttx/kmalloc.h>
 #include <nuttx/kthread.h>
 #include <nuttx/nuttx.h>
@@ -43,6 +44,12 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+/* Only float data type supported now */
+
+#ifdef CONFIG_SENSORS_USE_B16
+#  error fixed-point data type not supported yet
+#endif
 
 #define GOLDFISH_LIST_SENSOR_CMD "list-sensors"
 
@@ -608,7 +615,7 @@ static void goldfish_sensor_parse_event(FAR struct goldfish_sensor_s *sensor)
   else if ((value = goldfish_sensor_match(
                     buf, "magnetic-uncalibrated:")) != NULL)
     {
-      struct sensor_mag mag;
+      struct sensor_mag_uncal mag;
       if (sscanf(value, "%f:%f:%f",
                  &mag.x, &mag.y, &mag.z) == 3)
         {
@@ -616,13 +623,13 @@ static void goldfish_sensor_parse_event(FAR struct goldfish_sensor_s *sensor)
           mag.timestamp = now_ns + sensor->time_bias_ns;
           sensor->lower_mag_uncalibrated.lower.push_event(
                   sensor->lower_mag_uncalibrated.lower.priv,
-                  &mag, sizeof(struct sensor_mag));
+                  &mag, sizeof(struct sensor_mag_uncal));
         }
     }
   else if ((value = goldfish_sensor_match(
                     buf, "gyroscope-uncalibrated:")) != NULL)
     {
-      struct sensor_gyro gyro;
+      struct sensor_gyro_uncal gyro;
       if (sscanf(value, "%f:%f:%f",
                  &gyro.x, &gyro.y, &gyro.z) == 3)
         {
@@ -630,7 +637,7 @@ static void goldfish_sensor_parse_event(FAR struct goldfish_sensor_s *sensor)
           gyro.timestamp = now_ns + sensor->time_bias_ns;
           sensor->lower_gyro_uncalibrated.lower.push_event(
                   sensor->lower_gyro_uncalibrated.lower.priv,
-                  &gyro, sizeof(struct sensor_gyro));
+                  &gyro, sizeof(struct sensor_gyro_uncal));
         }
     }
   else if ((value = goldfish_sensor_match(buf, "hinge-angle0")) != NULL)
@@ -691,7 +698,7 @@ static void goldfish_sensor_parse_event(FAR struct goldfish_sensor_s *sensor)
   else if ((value = goldfish_sensor_match(
                     buf, "acceleration-uncalibrated:")) != NULL)
     {
-      struct sensor_accel accel;
+      struct sensor_accel_uncal accel;
       if (sscanf(value, "%f:%f:%f",
                  &accel.x, &accel.y, &accel.z) == 3)
         {
@@ -699,7 +706,7 @@ static void goldfish_sensor_parse_event(FAR struct goldfish_sensor_s *sensor)
           accel.timestamp = now_ns + sensor->time_bias_ns;
           sensor->lower_accel_uncalibrated.lower.push_event(
                   sensor->lower_accel_uncalibrated.lower.priv,
-                  &accel, sizeof(struct sensor_accel));
+                  &accel, sizeof(struct sensor_accel_uncal));
         }
     }
   else if ((value = goldfish_sensor_match(buf, "guest-sync:")) != NULL)

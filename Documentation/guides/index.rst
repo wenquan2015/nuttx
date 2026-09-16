@@ -16,7 +16,6 @@ Guides
   pysimcoder.rst
   customboards.rst
   customapps.rst
-  citests.rst
   zerolatencyinterrupts.rst
   fortify.rst
   nestedinterrupts.rst
@@ -38,6 +37,7 @@ Guides
   logging_rambuffer.rst
   ipv6.rst
   integrate_newlib.rst
+  fork_vfork_migration.rst
   protected_build.rst
   platform_directories.rst
   port_drivers_to_stm32f7.rst
@@ -62,4 +62,5 @@ Guides
   optee.rst
   qemu_tips.rst
   lwl.rst
+  stm32_ports.rst
 

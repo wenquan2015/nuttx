@@ -84,18 +84,6 @@
 #  define CONFIG_SIM_FB_INTERVAL_LINE 0
 #endif
 
-/* Use a stack alignment of 16 bytes.  If necessary frame_size must be
- * rounded up to the next boundary
- */
-
-#define STACK_ALIGNMENT     16
-
-/* Stack alignment macros */
-
-#define STACK_ALIGN_MASK    (STACK_ALIGNMENT - 1)
-#define STACK_ALIGN_DOWN(a) ((a) & ~STACK_ALIGN_MASK)
-#define STACK_ALIGN_UP(a)   (((a) + STACK_ALIGN_MASK) & ~STACK_ALIGN_MASK)
-
 /* Simulated Heap Definitions ***********************************************/
 
 /* Size of the simulated heap */
@@ -107,12 +95,6 @@
 #define sim_savestate(regs) sim_copyfullstate(regs, up_current_regs())
 #define sim_restorestate(regs) up_set_current_regs(regs)
 
-/* Provide a common interface, which should have different conversions
- * on different platforms.
- */
-
-#define host_errno_convert(errcode) (errcode)
-
 #define sim_saveusercontext(saveregs, ret)                      \
     do                                                          \
       {                                                         \
@@ -123,6 +105,7 @@
         val[0] = flags & UINT32_MAX;                            \
         val[1] = (flags >> 32) & UINT32_MAX;                    \
                                                                 \
+        env[JB_ERRNO] = host_errno_get();                       \
         ret = setjmp(saveregs);                                 \
       }                                                         \
     while (0)
@@ -134,6 +117,8 @@
         uint32_t *flags = (uint32_t *)&env[JB_FLAG];            \
                                                                 \
         up_irq_restore(((uint64_t)flags[1] << 32) | flags[0]);  \
+                                                                \
+        host_errno_set(env[JB_ERRNO]);                          \
         longjmp(env, 1);                                        \
       }                                                         \
     while (0)
@@ -154,18 +139,6 @@
         up_irq_restore(flags_);                                 \
       }                                                         \
     while (0)
-
-#define host_uninterruptible_errno(func, ...)                   \
-    ({                                                          \
-        uint64_t flags_ = up_irq_save();                        \
-        typeof(func(__VA_ARGS__)) ret_ = func(__VA_ARGS__);     \
-        if (ret_ < 0)                                           \
-          {                                                     \
-            ret_ = host_errno_convert(-errno);                  \
-          }                                                     \
-        up_irq_restore(flags_);                                 \
-        ret_;                                                   \
-    })
 
 /* File System Definitions **************************************************/
 
@@ -213,6 +186,7 @@ struct i2c_master_s;
 
 extern int g_argc;
 extern char **g_argv;
+extern struct kwork_wqueue_s *g_work_queue;
 
 /****************************************************************************
  * Public Function Prototypes
@@ -227,6 +201,16 @@ void sim_copyfullstate(xcpt_reg_t *dest, xcpt_reg_t *src);
 void *sim_doirq(int irq, void *regs);
 void  sim_unlock(void);
 
+/* sim_errno.c */
+
+int host_errno_convert(int errcode);
+int host_errno_get(void);
+void host_errno_set(int errcode);
+
+/* sim_hostirq.c ************************************************************/
+
+void host_irqinitialize(void);
+
 /* sim_hostmisc.c ***********************************************************/
 
 void host_abort(int status);
@@ -240,6 +224,7 @@ void host_init_cwd(void);
 pid_t host_posix_spawn(const char *path,
                        char *const argv[], char *const envp[]);
 int   host_waitpid(pid_t pid);
+int   host_kill(pid_t pid, int sig);
 
 /* sim_hostmemory.c *********************************************************/
 
@@ -260,8 +245,18 @@ int host_inittimer(void);
 uint64_t host_gettime(bool rtc);
 void host_sleep(uint64_t nsec);
 void host_sleepuntil(uint64_t nsec);
+void host_set_timeratio(int ratio);
 int host_timerirq(void);
 int host_settimer(uint64_t nsec);
+
+#ifdef CONFIG_SIM_BSIM_TIME
+int host_bsimtime_init(const char *sim_id, const char *phy_id,
+                       unsigned int dev_nbr);
+uint64_t host_bsimtime_gettime(void);
+bool host_bsimtime_is_enabled(void);
+void host_bsimtime_sleepuntil(uint64_t nsec);
+void host_bsimtime_disconnect(void);
+#endif
 
 /* sim_sigdeliver.c *********************************************************/
 
@@ -290,6 +285,12 @@ int sim_init_func_call_ipi(int irq);
 void sim_timer_update(void);
 #endif
 
+/* sim_rtc.c ****************************************************************/
+
+#ifdef CONFIG_RTC_DRIVER
+int sim_rtc_initialize(void);
+#endif
+
 /* sim_uart.c ***************************************************************/
 
 void sim_uartinit(void);
@@ -298,6 +299,7 @@ void sim_uartinit(void);
 
 void host_uart_start(void);
 int  host_uart_open(const char *pathname);
+int  host_uart_openpty(const char *name);
 void host_uart_close(int fd);
 int  host_uart_puts(int fd, const char *buf, size_t size);
 int  host_uart_gets(int fd, char *buf, size_t size);
@@ -336,6 +338,14 @@ int sim_tsc_initialize(int minor);
 int sim_tsc_uninitialize(void);
 #endif
 
+/* sim_mouse.c **************************************************************/
+
+#ifdef CONFIG_SIM_MOUSE
+int sim_mouse_initialize(int minor);
+int sim_mouse_uninitialize(void);
+void sim_mouseevent(int x, int y, int buttons, int wheel);
+#endif
+
 /* sim_keyboard.c ***********************************************************/
 
 #ifdef CONFIG_SIM_KEYBOARD
@@ -346,7 +356,8 @@ void sim_kbdevent(uint32_t key, bool is_press);
 /* sim_eventloop.c **********************************************************/
 
 #if defined(CONFIG_SIM_TOUCHSCREEN) || defined(CONFIG_SIM_AJOYSTICK) || \
-    defined(CONFIG_ARCH_BUTTONS) || defined(CONFING_SIM_KEYBOARD)
+    defined(CONFIG_ARCH_BUTTONS) || defined(CONFIG_SIM_KEYBOARD) || \
+    defined(CONFIG_SIM_MOUSE)
 void sim_x11events(void);
 void sim_buttonevent(int x, int y, int buttons);
 #endif
@@ -514,6 +525,11 @@ int sim_cansock_initialize(int devidx);
 #ifdef CONFIG_STACK_COLORATION
 size_t sim_stack_check(void *alloc, size_t size);
 void sim_stack_color(void *stackbase, size_t nbytes);
+#endif
+
+#ifdef CONFIG_SIM_GPIOCHIP
+int sim_gpiochip_initialize(const char *filename);
+struct ioexpander_dev_s *sim_gpiochip_get_ioe(void);
 #endif
 
 #endif /* __ASSEMBLY__ */

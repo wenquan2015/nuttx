@@ -31,7 +31,7 @@
 #include <assert.h>
 #include <string.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <net/if.h>
 #include <net/ethernet.h>
@@ -424,6 +424,8 @@ int netdev_register(FAR struct net_driver_s *dev, enum net_lltype_e lltype)
       dev->d_conncb = NULL;
       dev->d_conncb_tail = NULL;
       dev->d_devcb = NULL;
+
+      dev->d_polltype = 0;
 
       nxrmutex_init(&dev->d_lock);
 

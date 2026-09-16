@@ -214,6 +214,11 @@ you only focus on specific feature, we isolate the crtimon features to differenc
 configurations. Allow you only open some of the features to minimum the side effect
 of the performance etc.
 
+The scheduler calls ``nxsched_switch_critmon()`` whenever the running thread
+changes.  It accounts for the elapsed execution time of the outgoing thread and
+starts timing the incoming thread.  It also updates pre-emption and
+critical-section timing across the context switch.
+
 The Critical Section Monitor is enabled with the following setting in the
 configurations::
 
@@ -256,6 +261,14 @@ and preemption operations. Only have instructions when scheduler triggers contex
 * Default -1 to disable critical section entered time statistic.
 * >= 0 to enable critical section entered time statistic, data will be in critmon procfs.
 * > 0 to also do alert log when critical section entered time above the configuration ticks.
+
+**Critical section pre-entry busywait time**::
+
+  CONFIG_SCHED_CRITMONITOR_MAXTIME_BUSYWAIT=-1
+
+* Default -1 to disable critical section pre-entry busywait time statistic.
+* >= 0 to enable critical section pre-entry busywait time statistic, data will be in critmon procfs.
+* > 0 to also do alert log when critical section pre-entry busywait time above the configuration ticks.
 
 **Irq executing time**::
 
@@ -397,7 +410,7 @@ IRQ Monitor is beyond the scope of this page. Suffice it to say:
   interrupt handler until exit from the interrupt handler.
 
 From this information we can calculate the worst case response time from
-interrupt request until a task runs that can process the the interrupt.
+interrupt request until a task runs that can process the interrupt.
 That worst cast response time, ``Tresp``, is given by:
 
 * ``Tresp1 = Tcrit + Tintr + C1``

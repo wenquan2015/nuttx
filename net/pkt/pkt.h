@@ -245,8 +245,8 @@ void pkt_conn_list_unlock(void);
  *
  ****************************************************************************/
 
-uint16_t pkt_callback(FAR struct net_driver_s *dev,
-                      FAR struct pkt_conn_s *conn, uint16_t flags);
+uint32_t pkt_callback(FAR struct net_driver_s *dev,
+                      FAR struct pkt_conn_s *conn, uint32_t flags);
 
 /****************************************************************************
  * Name: pkt_input
@@ -397,7 +397,7 @@ int pkt_pollteardown(FAR struct socket *psock, FAR struct pollfd *fds);
  *
  ****************************************************************************/
 
-ssize_t pkt_sendmsg(FAR struct socket *psock, FAR struct msghdr *msg,
+ssize_t pkt_sendmsg(FAR struct socket *psock, FAR const struct msghdr *msg,
                     int flags);
 
 #ifdef CONFIG_NET_PKTPROTO_OPTIONS

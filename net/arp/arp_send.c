@@ -28,7 +28,7 @@
 
 #include <unistd.h>
 #include <string.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <netinet/in.h>
 #include <net/if.h>
@@ -81,12 +81,12 @@ static void arp_send_terminate(FAR struct net_driver_s *dev,
  * Name: arp_send_eventhandler
  ****************************************************************************/
 
-static uint16_t arp_send_eventhandler(FAR struct net_driver_s *dev,
-                                      FAR void *priv, uint16_t flags)
+static uint32_t arp_send_eventhandler(FAR struct net_driver_s *dev,
+                                      FAR void *priv, uint32_t flags)
 {
   FAR struct arp_send_s *state = (FAR struct arp_send_s *)priv;
 
-  ninfo("flags: %04x sent: %d\n", flags, state->snd_sent);
+  ninfo("flags: %" PRIx32 " sent: %d\n", flags, state->snd_sent);
 
   if (state)
     {
@@ -142,10 +142,6 @@ static uint16_t arp_send_eventhandler(FAR struct net_driver_s *dev,
   return flags;
 }
 
-static void arp_send_async_finish(FAR struct net_driver_s *dev, int result)
-{
-}
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -184,6 +180,7 @@ int arp_send(in_addr_t ipaddr)
   FAR struct net_driver_s *dev;
   struct arp_notify_s notify;
   struct arp_send_s state;
+  bool sending = false;
   int ret;
 
   /* First check if destination is a local broadcast. */
@@ -257,6 +254,10 @@ int arp_send(in_addr_t ipaddr)
       net_ipv4addr_copy(dripaddr, dev->d_draddr);
 #endif
       ipaddr = dripaddr;
+      if (ipaddr == INADDR_ANY)
+        {
+          return -EHOSTUNREACH;
+        }
     }
 
   /* The destination address is on the local network.  Check if it is
@@ -298,7 +299,9 @@ int arp_send(in_addr_t ipaddr)
    * sending the ARP request if it is not.
    */
 
-  do
+  ret = -ETIMEDOUT; /* Assume a timeout failure */
+
+  while (state.snd_retries < CONFIG_ARP_SEND_MAXTRIES)
     {
       /* Check if the address mapping is present in the ARP table.  This
        * is only really meaningful on the first time through the loop.
@@ -308,28 +311,32 @@ int arp_send(in_addr_t ipaddr)
        */
 
       netdev_lock(dev);
-      ret = arp_find(ipaddr, NULL, dev, true);
-      if (ret >= 0)
+      ret = arp_find(ipaddr, NULL, dev);
+      if (ret >= 0 || ret == -ENETUNREACH)
         {
-          /* We have it!  Break out with success */
+          /* We have it! Break out with ret value */
 
           netdev_unlock(dev);
-          goto out;
-        }
-      else if (ret == -ENETUNREACH)
-        {
-          /* We have failed before, simply send an asynchronous ARP request
-           * to try to update the ARP table.
-           */
-
-          netdev_unlock(dev);
-          arp_send_async(ipaddr, NULL);
-          goto out;
+          break;
         }
 
       /* Set up the ARP response wait BEFORE we send the ARP request */
 
       arp_wait_setup(ipaddr, &notify);
+
+      if (ret == -EINPROGRESS && !sending)
+        {
+          /* ARP request for the same destination is in progress, directly
+           * wait arp response notify.
+           *
+           * Drop the device lock: this path skips the netdev_unlock()
+           * below, and the receive path needs that same lock to deliver
+           * the reply.  The waiter above is already installed.
+           */
+
+          netdev_unlock(dev);
+          goto wait;
+        }
 
       /* Allocate resources to receive a callback.  This and the following
        * initialization is performed with the network lock because we don't
@@ -344,7 +351,7 @@ int arp_send(in_addr_t ipaddr)
               nerr("ERROR: Failed to allocate a callback\n");
               netdev_unlock(dev);
               ret = -ENOMEM;
-              goto out;
+              break;
             }
         }
 
@@ -357,20 +364,30 @@ int arp_send(in_addr_t ipaddr)
       state.snd_cb->event = arp_send_eventhandler;
       state.finish_cb     = NULL;
 
-      netdev_unlock(dev);
+      /* MAC address marked with all zeros to limit concurrent task
+       * send ARP request for same destination.
+       */
+
+      if (state.snd_retries == 0)
+        {
+          arp_update(dev, ipaddr, NULL, 0);
+          sending = true;
+        }
 
       /* Notify the device driver that new TX data is available. */
 
-      netdev_txnotify_dev(dev);
+      netdev_txnotify_dev(dev, ARP_POLL);
 
       /* Wait for the send to complete or an error to occur.
-       * net_sem_wait will also terminate if a signal is received.
+       * nxsem_tickwait will also terminate if a signal is received.
        */
+
+      netdev_unlock(dev);
 
       do
         {
-          ret = net_sem_timedwait_uninterruptible(&state.snd_sem,
-                                              CONFIG_ARP_SEND_DELAYMSEC);
+          ret = nxsem_tickwait(&state.snd_sem,
+                               MSEC2TICK(CONFIG_ARP_SEND_DELAYMSEC));
           if (ret == -ETIMEDOUT)
             {
               arp_wait_cancel(&notify);
@@ -393,6 +410,7 @@ int arp_send(in_addr_t ipaddr)
 
       /* Now wait for response to the ARP response to be received. */
 
+wait:
       ret = arp_wait(&notify, CONFIG_ARP_SEND_DELAYMSEC);
 
       /* arp_wait will return OK if and only if the matching ARP response
@@ -403,7 +421,7 @@ int arp_send(in_addr_t ipaddr)
         {
           /* Break out if arp_wait() fails */
 
-          goto out;
+          break;
         }
 
 timeout:
@@ -415,18 +433,9 @@ timeout:
            ip4_addr1(ipaddr), ip4_addr2(ipaddr),
            ip4_addr3(ipaddr), ip4_addr4(ipaddr));
     }
-  while (state.snd_retries < CONFIG_ARP_SEND_MAXTRIES);
 
-  /* MAC address marked with all zeros, therefore, we can quickly execute
-   * asynchronous ARP request next time.
-   */
-
-  arp_update(dev, ipaddr, NULL);
-
-out:
   nxsem_destroy(&state.snd_sem);
   arp_callback_free(dev, state.snd_cb);
-
   return ret;
 }
 
@@ -496,11 +505,11 @@ int arp_send_async(in_addr_t ipaddr, arp_send_finish_cb_t cb)
   state->snd_cb->flags = (ARP_POLL | NETDEV_DOWN);
   state->snd_cb->priv  = (FAR void *)state;
   state->snd_cb->event = arp_send_eventhandler;
-  state->finish_cb     = cb ? cb : arp_send_async_finish;
+  state->finish_cb     = cb;
 
   /* Notify the device driver that new TX data is available. */
 
-  netdev_txnotify_dev(dev);
+  netdev_txnotify_dev(dev, ARP_POLL);
 
 errout_with_lock:
   netdev_unlock(dev);

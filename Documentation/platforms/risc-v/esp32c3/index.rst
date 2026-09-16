@@ -131,6 +131,12 @@ where:
 * ``ESPTOOL_BINDIR=./`` is the path of the externally-built 2nd stage bootloader and the partition table (if applicable): when built using the ``make bootloader``, these files are placed into ``nuttx`` folder.
 * ``ESPTOOL_BAUD`` is able to change the flash baud rate if desired.
 
+To create and flash with UF2 (USB Flashing Format) binary, ``UF2=1`` option needs to be set during build phase
+(e.g ``make UF2=1 -j8``). This flag will create UF2 format file addition to binary. This output can be used to
+flash the device with `ESP USB Bridge <https://github.com/espressif/esp-usb-bridge>`__.
+To flash using ESP USB Bridge, either drag and drop the generated UF2 file onto the flasher's
+mass storage device, or use the ``UF2=1`` flag during flashing (e.g. ``make flash ESPTOOL_PORT=<port> ESPTOOL_BINDIR=./ UF2=1``)
+
 Flashing NSH Example
 --------------------
 
@@ -177,6 +183,75 @@ Now opening the serial port with a terminal emulator should show the NuttX conso
   NuttShell (NSH) NuttX-12.8.0
   nsh> uname -a
   NuttX 12.8.0 759d37b97c-dirty Mar  5 2025 19:58:56 risc-v esp32c3-devkit
+
+Building with CMake
+-------------------
+
+General CMake usage (out-of-tree build, ``menuconfig`` target, and so on) is described in
+:doc:`/quickstart/compiling_cmake`. The ESP32-C3 common arch enables post-build steps that
+produce ``nuttx.bin`` (and related images) under the **CMake binary directory**; the build
+log also prints suggested ``esptool.py`` command lines for your layout.
+
+Example (NuttX shell defconfig, Ninja generator)::
+
+  $ cd nuttx
+  $ cmake -B build -DBOARD_CONFIG=esp32c3-devkit:nsh -GNinja
+  $ cmake --build build
+
+To reconfigure the tree after changing options (same as other NuttX CMake boards)::
+
+  $ cmake --build build -t menuconfig
+  $ cmake --build build
+
+Persistent HAL cache (``NXTMPDIR``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Pass ``-DNXTMPDIR=ON`` at **configure** time to reuse a persistent clone of the
+``esp-hal-3rdparty`` repository under ``nuttx/../nxtmpdir/esp-hal-3rdparty``. CMake checks
+the expected revision; if it does not match, the cache directory is refreshed. This cuts
+repeat configure/build time when the HAL checkout would otherwise be re-fetched into the
+binary directory.
+
+Example::
+
+  $ cmake -B build -DBOARD_CONFIG=esp32c3-devkit:nsh -DNXTMPDIR=ON -GNinja
+  $ cmake --build build
+
+MCUBoot: building the 2nd-stage bootloader (``-t bootloader``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For configurations that use MCUboot, build the bootloader the same way as
+with Make, but via the CMake target::
+
+  $ cmake --build build -t bootloader
+
+The image is installed as ``mcuboot-esp32c3.bin`` in the NuttX **source** directory (not
+inside ``build/``).
+
+.. note::
+
+   Flashing paths differ from the pure-Make flow: the application image is under your CMake
+   build directory (for example ``build/nuttx.bin``), while MCUboot binaries live next to
+   ``nuttx`` sources.
+
+Target flashing (``-t flash``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+After a successful CMake build, you can flash the chip with the ``flash`` custom target.
+This is the CMake-side equivalent of the Make ``FLASH`` logic in
+``tools/espressif/Config.mk``.
+
+**Serial port:** you must set ``ESPTOOL_PORT`` to a non-empty value (for example
+``/dev/ttyUSB0``). If it is unset or empty, the flash step fails.
+
+Example::
+
+  $ export ESPTOOL_PORT=/dev/ttyUSB0
+  $ cmake --build build -t flash
+
+Or for a single invocation::
+
+  $ ESPTOOL_PORT=/dev/ttyUSB0 cmake --build build -t flash
 
 Debugging
 =========
@@ -350,7 +425,7 @@ The following list indicates the state of peripherals' support in NuttX:
 Peripheral  Support NOTES
 =========== ======= ====================
 ADC          Yes    Oneshot
-AES          No
+AES          Yes
 Bluetooth    Yes
 CAN/TWAI     Yes
 DMA          No
@@ -631,18 +706,18 @@ based on the default KConfig values:
      - 64KB
    * - Primary Application Slot (/dev/ota0)
      - 0x020000
-     - 1MB
+     - 1.4MB
    * - Secondary Application Slot (/dev/ota1)
-     - 0x120000
-     - 1MB
+     - 0x170000
+     - 1.4MB
    * - Scratch Partition (/dev/otascratch)
-     - 0x220000
+     - 0x2C0000
      - 256KB
    * - Storage MTD (optional)
-     - 0x260000
+     - 0x300000
      - 1MB
    * - Available Flash
-     - 0x360000+
+     - 0x400000+
      - Remaining
 
 .. raw:: html
@@ -671,27 +746,27 @@ virtual E-Fuses are later enabled.
     0x020000  ├─────────────────────────────┤
               │                             │
               │      Primary App Slot       │
-              │            (1MB)            │
+              │            (1.4MB)          │
               │          /dev/ota0          │
               │                             │
-    0x120000  ├─────────────────────────────┤
+    0x170000  ├─────────────────────────────┤
               │                             │
               │     Secondary App Slot      │
-              │            (1MB)            │
+              │            (1.4MB)          │
               │          /dev/ota1          │
               │                             │
-    0x220000  ├─────────────────────────────┤
+    0x2C0000  ├─────────────────────────────┤
               │                             │
               │      Scratch Partition      │
               │           (256KB)           │
               │       /dev/otascratch       │
               │                             │
-    0x260000  ├─────────────────────────────┤
+    0x300000  ├─────────────────────────────┤
               │                             │
               │   Storage MTD (optional)    │
               │            (1MB)            │
               │                             │
-    0x360000  ├─────────────────────────────┤
+    0x400000  ├─────────────────────────────┤
               │                             │
               │       Available Flash       │
               │         (Remaining)         │
@@ -701,11 +776,11 @@ virtual E-Fuses are later enabled.
 The key KConfig options that control this layout:
 
 - ``ESPRESSIF_OTA_PRIMARY_SLOT_OFFSET`` (default: 0x20000)
-- ``ESPRESSIF_OTA_SECONDARY_SLOT_OFFSET`` (default: 0x120000)
-- ``ESPRESSIF_OTA_SLOT_SIZE`` (default: 0x100000)
-- ``ESPRESSIF_OTA_SCRATCH_OFFSET`` (default: 0x220000)
+- ``ESPRESSIF_OTA_SECONDARY_SLOT_OFFSET`` (default: 0x170000)
+- ``ESPRESSIF_OTA_SLOT_SIZE`` (default: 0x150000)
+- ``ESPRESSIF_OTA_SCRATCH_OFFSET`` (default: 0x2C0000)
 - ``ESPRESSIF_OTA_SCRATCH_SIZE`` (default: 0x40000)
-- ``ESPRESSIF_STORAGE_MTD_OFFSET`` (default: 0x260000 when MCUBoot enabled)
+- ``ESPRESSIF_STORAGE_MTD_OFFSET`` (default: 0x300000 when MCUBoot enabled)
 - ``ESPRESSIF_STORAGE_MTD_SIZE`` (default: 0x100000)
 
 For MCUBoot operation:

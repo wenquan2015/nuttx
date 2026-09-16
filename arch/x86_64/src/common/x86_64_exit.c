@@ -27,7 +27,7 @@
 #include <nuttx/config.h>
 
 #include <sched.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
@@ -66,6 +66,17 @@ void up_exit(int status)
 
   tcb = this_task();
 
+#ifdef CONFIG_ARCH_ADDRENV
+  /* Make sure that the address environment for the previously running
+   * task is closed down gracefully (data caches dump, MMU flushed) and
+   * set up the address environment for the new thread at the head of
+   * the ready-to-run list.
+   */
+
+  addrenv_switch(tcb);
+  tcb = this_task();
+#endif
+
   /* Adjusts time slice for SCHED_RR & SCHED_SPORADIC cases
    * NOTE: the API also adjusts the global IRQ control for SMP
    */
@@ -76,33 +87,19 @@ void up_exit(int status)
 
   x86_64_restore_auxstate(tcb);
 
-#ifdef CONFIG_ARCH_ADDRENV
-  /* Make sure that the address environment for the previously running
-   * task is closed down gracefully (data caches dump, MMU flushed) and
-   * set up the address environment for the new thread at the head of
-   * the ready-to-run list.
-   */
-
-  addrenv_switch(tcb);
-#endif
-
-  /* Restore the cpu lock */
-
-  restore_critical_section(tcb, this_cpu());
-
 #ifdef CONFIG_ARCH_KERNEL_STACK
   /* Update kernel stack top pointer */
 
   x86_64_set_ktopstk(tcb->xcp.ktopstk);
 #endif
 
-  /* Then switch contexts */
-
-  x86_64_fullcontextrestore(tcb->xcp.regs);
-
-  /* x86_64_fullcontextrestore() should not return but could if the software
-   * interrupts are disabled.
+  /* Restore the cpu lock.  This must come last and the final jump must
+   * not touch the stack (see up_switch_context()).
    */
 
-  PANIC();
+  restore_critical_section(tcb, this_cpu());
+
+  __asm__ volatile ("jmp x86_64_fullcontextrestore"
+                    :: "D" (tcb->xcp.regs) : "memory");
+  __builtin_unreachable();
 }

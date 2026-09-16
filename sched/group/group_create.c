@@ -26,11 +26,12 @@
 
 #include <nuttx/config.h>
 
+#include <string.h>
 #include <sched.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
 
+#include <nuttx/debug.h>
 #include <nuttx/irq.h>
 #include <nuttx/fs/fs.h>
 #include <nuttx/kmalloc.h>
@@ -78,10 +79,20 @@ static inline void group_inherit_identity(FAR struct task_group_s *group)
   /* Inherit the user identity from the parent task group. */
 
   DEBUGASSERT(group != NULL);
-  group->tg_uid = rgroup->tg_uid;
-  group->tg_gid = rgroup->tg_gid;
+  group->tg_uid  = rgroup->tg_uid;
+  group->tg_gid  = rgroup->tg_gid;
   group->tg_euid = rgroup->tg_euid;
   group->tg_egid = rgroup->tg_egid;
+  group->tg_suid = rgroup->tg_suid;
+  group->tg_sgid = rgroup->tg_sgid;
+#if CONFIG_SCHED_NGROUPS > 0
+  group->tg_ngroups = rgroup->tg_ngroups;
+  if (rgroup->tg_ngroups > 0)
+    {
+      memcpy(group->tg_groups, rgroup->tg_groups,
+             rgroup->tg_ngroups * sizeof(gid_t));
+    }
+#endif
 }
 #else
 #  define group_inherit_identity(group)
@@ -162,6 +173,14 @@ int group_allocate(FAR struct tcb_s *tcb, uint8_t ttype)
 
   sq_init(&group->tg_members);
 #endif
+
+#ifdef CONFIG_FS_BACKTRACE_DEFAULT
+  /* Enable FD backtrace for the group by default */
+
+  group->tg_flags |= GROUP_FLAG_FD_BACKTRACE;
+#endif
+
+  group->tg_flags |= GROUP_FLAG_DUMPABLE;
 
   /* Attach the group to the TCB */
 
@@ -254,4 +273,6 @@ void group_initialize(FAR struct tcb_s *tcb)
     {
       group->tg_pid = tcb->pid;
     }
+
+  group->tg_info->ta_pid = group->tg_pid;
 }

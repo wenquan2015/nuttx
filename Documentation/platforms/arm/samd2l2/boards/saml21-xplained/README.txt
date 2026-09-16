@@ -338,7 +338,7 @@ NuttX EABI "buildroot" Toolchain
   different from the default in your PATH variable).
 
   If you have no Cortex-M0 toolchain, one can be downloaded from the NuttX
-  Bitbucket download site (https://bitbucket.org/nuttx/buildroot/downloads/).
+  buildroot repository (https://github.com/patacongo/buildroot).
   This GNU toolchain builds and executes in the Linux or Cygwin environment.
 
   1. You must have already configured NuttX in <some-dir>/nuttx.
@@ -796,9 +796,6 @@ Configuration sub-directories
        Board Selection -> SAML21 Xplained Pro Modules
          CONFIG_SAML21_XPLAINED_IOMODULE=y      : I/O1 module is connected
          CONFIG_SAML21_XPLAINED_IOMODULE_EXT2=y : I/O1 modules is in EXT2
-
-       Application Configuration -> NSH Library
-         CONFIG_NSH_ARCHINIT=y             : Board has architecture-specific initialization
 
        NOTE: If you enable the I/O1 this configuration with SERCOM4 as the
        console and with the I/O1 module in EXT1, you *must* remove USART

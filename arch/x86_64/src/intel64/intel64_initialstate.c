@@ -51,12 +51,6 @@
 #  error x86_64 stack canaries requires TLS support !
 #endif
 
-/* Aligned size of the kernel stack */
-
-#ifdef CONFIG_ARCH_KERNEL_STACK
-#  define ARCH_KERNEL_STACKSIZE STACK_ALIGN_UP(CONFIG_ARCH_KERNEL_STACKSIZE)
-#endif
-
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -86,8 +80,9 @@ void up_initial_state(struct tcb_s *tcb)
 
   if (tcb->pid == IDLE_PROCESS_ID)
     {
-      char *stack_ptr = (char *)(g_idle_topstack[0] -
+      char *stack_ptr = (char *)(x86_64_idle_topstack(0) -
                                  CONFIG_IDLETHREAD_STACKSIZE);
+
       tcb->stack_alloc_ptr = stack_ptr;
       tcb->stack_base_ptr  = stack_ptr;
       tcb->adj_stack_size  = CONFIG_IDLETHREAD_STACKSIZE;

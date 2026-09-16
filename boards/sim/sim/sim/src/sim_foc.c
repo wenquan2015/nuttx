@@ -29,7 +29,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <errno.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 
 #include <arch/board/board.h>
 
@@ -69,8 +69,6 @@ static void sim_foc_interrupt(wdparm_t arg)
  *
  * Description:
  *   Initialize the FOC device.
- *
- *   This function should be call by board_app_initialize().
  *
  * Returned Value:
  *   0 on success, a negated errno value on failure

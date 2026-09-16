@@ -28,6 +28,7 @@
 #include <assert.h>
 #include <nuttx/arch.h>
 #include <nuttx/clock.h>
+
 #include "hrtimer/hrtimer.h"
 
 /****************************************************************************
@@ -39,9 +40,10 @@
  *
  * Description:
  *   Process all expired high-resolution timers. This function repeatedly
- *   retrieves the earliest timer from the active timer RB-tree, checks if it
- *   has expired relative to the current time, removes it from the tree,
- *   and invokes its callback function. Processing continues until:
+ *   retrieves the earliest timer from the active timer queue, checks
+ *   if it has expired relative to the current time, removes it from the
+ *   queue, and invokes its callback function. Processing continues
+ *   until:
  *
  *     1. No additional timers have expired, or
  *     2. The active timer set is empty.
@@ -54,13 +56,13 @@
  *       if no timers remain.
  *
  * Input Parameters:
- *   ts - Pointer to the current high-resolution timestamp.
+ *   now - Current high-resolution timestamp.
  *
  * Returned Value:
  *   None.
  *
  * Assumptions/Notes:
- *   - This function acquires a spinlock to protect the timer RB-tree.
+ *   - This function acquires a spinlock to protect the timer queue.
  *   - Timer callbacks are invoked with interrupts enabled
  *     to avoid deadlocks.
  *   - DEBUGASSERT ensures that timer callbacks are valid.
@@ -69,75 +71,79 @@
 void hrtimer_process(uint64_t now)
 {
   FAR hrtimer_t *hrtimer;
-  uint64_t expired;
-  uint32_t period = 0;
   irqstate_t flags;
+  hrtimer_entry_t func;
+  uint64_t expired;
+  uint64_t delay;
+  int cpu = this_cpu();
 
-  /* Lock the hrtimer RB-tree to protect access */
+  /* Acquire the lock and seize the ownership of the hrtimer queue. */
 
-  flags = spin_lock_irqsave(&g_hrtimer_spinlock);
+  flags = write_seqlock_irqsave(&g_hrtimer_lock);
 
-  /* Fetch the earliest active timer */
-
-  hrtimer = (FAR hrtimer_t *)RB_MIN(hrtimer_tree_s, &g_hrtimer_tree);
-
-  while (hrtimer != NULL)
+  for (; ; )
     {
+      /* Fetch the earliest active timer */
+
+      hrtimer = hrtimer_get_first();
+      expired = hrtimer->expired;
+
       /* Check if the timer has expired */
 
-      if (!clock_compare(hrtimer->expired, now))
+      if (!HRTIMER_TIME_BEFORE_EQ(expired, now))
         {
           break;
         }
 
-      /* Remove the expired timer from the active tree */
+      /* Remove the expired timer from the timer queue */
 
-      RB_REMOVE(hrtimer_tree_s, &g_hrtimer_tree, &hrtimer->node);
+      func = hrtimer->func;
+      hrtimer_remove(hrtimer);
 
-      /* Ensure the timer callback is valid */
+      hrtimer_mark_running(hrtimer, cpu);
 
-      DEBUGASSERT(hrtimer->func != NULL);
+      /* Leave critical section before invoking the callback */
 
-      hrtimer->state = HRTIMER_STATE_RUNNING;
-
-      spin_unlock_irqrestore(&g_hrtimer_spinlock, flags);
+      write_sequnlock_irqrestore(&g_hrtimer_lock, flags);
 
       /* Invoke the timer callback */
 
-      period = hrtimer->func(hrtimer);
+      delay = func(hrtimer, expired);
 
-      flags = spin_lock_irqsave(&g_hrtimer_spinlock);
+      /* Ensure the delay is valid. */
 
-      if ((hrtimer->state == HRTIMER_STATE_CANCELED) || (period == 0))
+      DEBUGASSERT(HRTIMER_TIME_BEFORE_EQ(expired + delay,
+                                         now + HRTIMER_MAX_DELAY));
+
+      /* Re-enter critical section to update timer state */
+
+      flags = write_seqlock_irqsave(&g_hrtimer_lock);
+
+      /* If the timer is periodic and has not been rearmed or
+       * cancelled concurrently, calculate next expiration and
+       * re-insert into the timer queue.
+       */
+
+      if (delay != 0u && hrtimer_is_running(hrtimer, cpu))
         {
-          /* Timer is canceled or one-shot; mark it inactive */
-
-          hrtimer->state = HRTIMER_STATE_INACTIVE;
+          hrtimer->expired = expired + delay;
+          hrtimer->func    = func;
+          hrtimer_insert(hrtimer);
         }
-      else
-        {
-          /* Restart the periodic timer */
-
-          hrtimer->expired += period;
-          hrtimer->state = HRTIMER_STATE_ARMED;
-          RB_INSERT(hrtimer_tree_s, &g_hrtimer_tree, &hrtimer->node);
-        }
-
-      /* Fetch the next earliest timer */
-
-      hrtimer = (FAR hrtimer_t *)RB_MIN(hrtimer_tree_s, &g_hrtimer_tree);
     }
+
+  hrtimer_unmark_running(cpu);
 
   /* Schedule the next timer expiration */
 
-  if (hrtimer != NULL)
+  if (expired != now)
     {
       /* Start timer for the next earliest expiration */
 
-      (void)hrtimer_starttimer(hrtimer->expired);
+      hrtimer_reprogram(expired);
     }
 
-  /* Leave critical section */
+  /* Release the lock and give up the ownership of the hrtimer queue. */
 
-  spin_unlock_irqrestore(&g_hrtimer_spinlock, flags);
+  write_sequnlock_irqrestore(&g_hrtimer_lock, flags);
 }

@@ -73,7 +73,8 @@ enum nx_initstate_e
   OSINIT_OSREADY   = 5,  /* The OS is fully initialized and multi-tasking is
                           * active. */
   OSINIT_IDLELOOP  = 6,  /* The OS enter idle loop. */
-  OSINIT_PANIC     = 7   /* Fatal error happened. */
+  OSINIT_RESET     = 7,  /* The OS is in resetting process. */
+  OSINIT_PANIC     = 8   /* Fatal error happened. */
 };
 
 /****************************************************************************
@@ -93,7 +94,7 @@ extern "C"
  * hardware resources may not yet be available to the OS-internal logic.
  */
 
-EXTERN volatile uint8_t g_nx_initstate;  /* See enum nx_initstate_e */
+EXTERN volatile enum nx_initstate_e g_nx_initstate;  /* See enum nx_initstate_e */
 
 /****************************************************************************
  * Public Function Prototypes

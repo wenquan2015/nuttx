@@ -182,6 +182,10 @@ config NRF53_RTC
 	bool
 	default n
 
+config NRF53_QDEC
+	bool
+	default n
+
 menu "nRF53 Peripheral Selection"
 
 config NRF53_GPIOTE
@@ -420,6 +424,13 @@ config NRF53_SYSTIMER_RTC
 
 endchoice # System Timer Source
 
+config NRF53_DCDC
+	bool "Enable DC/DC regulator"
+	default n
+	---help---
+		This option enables the DC/DC regulator, which reduces
+		current consumption. This requires extra circuitry (inductors).
+
 if NRF53_SYSTIMER_RTC
 
 config NRF53_SYSTIMER_RTC_INSTANCE
@@ -433,6 +444,23 @@ config NRF53_SYSTIMER_RTC_INSTANCE
 endif # NRF53_SYSTIMER_RTC
 
 endmenu # System Timer
+
+config NRF53_CACHE
+	bool "Application core flash cache"
+	depends on NRF53_APPCORE
+	default n
+	---help---
+		Enable the application core CACHE peripheral, which caches both
+		instruction and data accesses towards flash and XIP code regions.
+		The application core runs uncached without this, so enabling it is
+		a substantial speedup on any flash-resident code path.
+
+		The cache does not observe writes to the memory it caches. The
+		in-tree progmem driver handles this, but code outside the kernel
+		that programs flash, or a board that maps QSPI into the XIP
+		window and writes it, must invalidate the cache itself. Left off
+		by default for that reason, matching ARMV7M_ICACHE and
+		ARMV8M_ICACHE/DCACHE.
 
 config NRF53_FLASH_PREFETCH
 	bool "Enable FLASH Pre-fetch"
@@ -713,6 +741,30 @@ config NRF53_QSPI_RXDELAY
 endif # NRF53_QSPI
 
 endmenu # QSPI Configuration
+
+config NRF53_QDEC0
+	bool "Qencoder 0 (QDEC0) support"
+	default n
+	select NRF53_QDEC
+	---help---
+		Enable Qencoder 0 support.
+
+config NRF53_QDEC1
+	bool "Qencoder 1 (QDEC1) support"
+	default n
+	select NRF53_QDEC
+	---help---
+		Enable Qencoder 1 support.
+
+config NRF53_QENCODER_INDEX
+	bool "Enable QDEC index pin support"
+	default n
+	depends on NRF53_GPIOTE && NRF53_QDEC
+	---help---
+		Enable index/Z channel support for quadrature encoder.
+		Uses a GPIO interrupt to detect index pulses and reset
+		position to configured index value. Requires one GPIOTE
+		channel for interrupt detection.
 
 menuconfig NRF53_SOFTDEVICE_CONTROLLER
 	bool "SoftDevice Controller"

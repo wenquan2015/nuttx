@@ -27,7 +27,7 @@
 #include <nuttx/config.h>
 
 #include <assert.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/types.h>
@@ -795,6 +795,7 @@ int ipv4_nat_outbound(FAR struct net_driver_s *dev,
         {
           /* Outbound entry creation failed, should have entry. */
 
+          nat_unlock();
           return -ENOENT;
         }
     }

@@ -29,7 +29,7 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <debug.h>
+#include <nuttx/debug.h>
 #include <sys/time.h>
 
 #include <nuttx/net/netconfig.h>
@@ -247,11 +247,11 @@ errout:
  *
  ****************************************************************************/
 
-static inline uint16_t
+static inline uint32_t
 net_dataevent(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn,
-              uint16_t flags)
+              uint32_t flags)
 {
-  uint16_t ret;
+  uint32_t ret;
   uint8_t *buffer = dev->d_appdata;
   int      buflen = dev->d_len;
   uint16_t recvlen;
@@ -306,10 +306,10 @@ net_dataevent(FAR struct net_driver_s *dev, FAR struct udp_conn_s *conn,
  *
  ****************************************************************************/
 
-uint16_t udp_callback(FAR struct net_driver_s *dev,
-                      FAR struct udp_conn_s *conn, uint16_t flags)
+uint32_t udp_callback(FAR struct net_driver_s *dev,
+                      FAR struct udp_conn_s *conn, uint32_t flags)
 {
-  ninfo("flags: %04x\n", flags);
+  ninfo("flags: %" PRIx32 "\n", flags);
 
   /* Some sanity checking */
 
@@ -319,7 +319,6 @@ uint16_t udp_callback(FAR struct net_driver_s *dev,
 
       conn_lock(&conn->sconn);
       flags = devif_conn_event(dev, flags, conn->sconn.list);
-      conn_unlock(&conn->sconn);
 
       if ((flags & UDP_NEWDATA) != 0)
         {
@@ -327,6 +326,8 @@ uint16_t udp_callback(FAR struct net_driver_s *dev,
 
           flags = net_dataevent(dev, conn, flags);
         }
+
+      conn_unlock(&conn->sconn);
     }
 
   return flags;
